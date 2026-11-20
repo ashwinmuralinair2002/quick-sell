@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { useForm } from 'react-hook-form';
 import Navbar from '../components/Navbar';
 import { useAppDispatch } from '../store/hooks';
 import { createProduct } from '../store/productSlice';
@@ -16,13 +17,12 @@ const PRODUCT_CATEGORIES = {
 
 type CategoryName = keyof typeof PRODUCT_CATEGORIES;
 
-interface FormErrors {
-  title?: string;
-  description?: string;
-  price?: string;
-  category?: string;
-  subcategory?: string;
-  images?: string;
+interface AddProductFormValues {
+  title: string;
+  category: CategoryName | '';
+  subcategory: string;
+  price: string;
+  description: string;
 }
 
 interface ImagePreview {
@@ -34,14 +34,30 @@ const AddProduct: React.FC = () => {
   const navigate = useNavigate();
   const dispatch = useAppDispatch();
 
-  // Form Fields State
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [price, setPrice] = useState('');
-  const [category, setCategory] = useState<CategoryName | ''>('');
-  const [subcategory, setSubcategory] = useState('');
+  // React Hook Form
+  const {
+    register,
+    handleSubmit,
+    watch,
+    setValue,
+    clearErrors,
+    formState: { errors }
+  } = useForm<AddProductFormValues>({
+    defaultValues: {
+      title: '',
+      category: '',
+      subcategory: '',
+      price: '',
+      description: ''
+    },
+    mode: 'onSubmit'
+  });
+
+  const selectedCategory = watch('category');
+
+  // Images state and custom validation error
   const [images, setImages] = useState<ImagePreview[]>([]);
-  const [errors, setErrors] = useState<FormErrors>({});
+  const [imageError, setImageError] = useState<string | null>(null);
 
   // Loading and Server Response State
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -51,10 +67,9 @@ const AddProduct: React.FC = () => {
   // Handle Main Category Change
   const handleCategoryChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const selected = e.target.value as CategoryName | '';
-    setCategory(selected);
-    setSubcategory(''); // Reset subcategory when main category changes
-    if (errors.category) setErrors((prev) => ({ ...prev, category: undefined }));
-    if (errors.subcategory) setErrors((prev) => ({ ...prev, subcategory: undefined }));
+    setValue('category', selected, { shouldValidate: true });
+    setValue('subcategory', '', { shouldValidate: false }); // Reset subcategory when main category changes
+    clearErrors('subcategory');
     if (serverError) setServerError(null);
   };
 
@@ -66,10 +81,7 @@ const AddProduct: React.FC = () => {
     const maxAllowed = 5;
 
     if (images.length + selectedFiles.length > maxAllowed) {
-      setErrors((prev) => ({
-        ...prev,
-        images: `You can upload a maximum of ${maxAllowed} images`
-      }));
+      setImageError(`You can upload a maximum of ${maxAllowed} images`);
       return;
     }
 
@@ -79,7 +91,7 @@ const AddProduct: React.FC = () => {
     }));
 
     setImages((prev) => [...prev, ...newPreviews]);
-    if (errors.images) setErrors((prev) => ({ ...prev, images: undefined }));
+    if (imageError) setImageError(null);
     if (serverError) setServerError(null);
     // Reset file input value so same files can be re-selected if needed
     e.target.value = '';
@@ -94,65 +106,33 @@ const AddProduct: React.FC = () => {
     });
   };
 
-  // Validate Form
-  const validateForm = (): boolean => {
-    const newErrors: FormErrors = {};
-
-    if (!title.trim()) {
-      newErrors.title = 'Product title is required';
-    } else if (title.trim().length < 5) {
-      newErrors.title = 'Title must be at least 5 characters long';
-    }
-
-    if (!description.trim()) {
-      newErrors.description = 'Product description is required';
-    } else if (description.trim().length < 15) {
-      newErrors.description = 'Description must be at least 15 characters long';
-    }
-
-    const numPrice = Number(price);
-    if (!price.trim()) {
-      newErrors.price = 'Price is required';
-    } else if (Number.isNaN(numPrice) || numPrice <= 0) {
-      newErrors.price = 'Price must be a positive number greater than 0';
-    }
-
-    if (!category) {
-      newErrors.category = 'Please select a main category';
-    }
-
-    if (!subcategory) {
-      newErrors.subcategory = 'Please select a subcategory';
-    }
-
-    if (images.length < 2) {
-      newErrors.images = 'At least two product images are required (maximum 5)';
-    }
-
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  };
-
   // Handle Form Submission with Real Backend Integration
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const onFormSubmit = async (data: AddProductFormValues) => {
     setServerError(null);
     setSuccessMessage(null);
 
-    if (!validateForm()) {
+    // Validate images (minimum 2, maximum 5)
+    if (images.length < 2) {
+      setImageError('At least two product images are required (maximum 5)');
       return;
     }
 
+    if (images.length > 5) {
+      setImageError('You can upload a maximum of 5 images');
+      return;
+    }
+
+    setImageError(null);
     setIsSubmitting(true);
 
     try {
       // Build FormData payload
       const formData = new FormData();
-      formData.append('title', title.trim());
-      formData.append('description', description.trim());
-      formData.append('price', price.trim());
-      formData.append('category', category);
-      formData.append('subcategory', subcategory);
+      formData.append('title', data.title.trim());
+      formData.append('description', data.description.trim());
+      formData.append('price', data.price.trim());
+      formData.append('category', data.category);
+      formData.append('subcategory', data.subcategory);
 
       // Append each image using repeated 'images' field name for Multer
       images.forEach((img) => {
@@ -227,7 +207,7 @@ const AddProduct: React.FC = () => {
               </div>
             )}
 
-            <form onSubmit={handleSubmit} noValidate>
+            <form onSubmit={handleSubmit(onFormSubmit)} noValidate>
               {/* Product Title */}
               <div className="mb-3">
                 <label htmlFor="title" className="form-label">
@@ -239,14 +219,21 @@ const AddProduct: React.FC = () => {
                   disabled={isSubmitting}
                   className={`form-control ${errors.title ? 'is-invalid' : ''}`}
                   placeholder="e.g. Apple iPhone 14 Pro 128GB Deep Purple (With Bill & Box)"
-                  value={title}
-                  onChange={(e) => {
-                    setTitle(e.target.value);
-                    if (errors.title) setErrors((prev) => ({ ...prev, title: undefined }));
-                    if (serverError) setServerError(null);
-                  }}
+                  {...register('title', {
+                    required: 'Product title is required',
+                    validate: (value) => {
+                      const trimmed = value.trim();
+                      if (!trimmed) return 'Product title is required';
+                      if (trimmed.length < 5) return 'Title must be at least 5 characters long';
+                      if (!/[a-zA-Z]/.test(trimmed)) return 'Title must contain at least one letter';
+                      return true;
+                    },
+                    onChange: () => {
+                      if (serverError) setServerError(null);
+                    }
+                  })}
                 />
-                {errors.title && <div className="field-error">{errors.title}</div>}
+                {errors.title && <div className="field-error">{errors.title.message}</div>}
               </div>
 
               {/* Category & Subcategory Row */}
@@ -255,21 +242,32 @@ const AddProduct: React.FC = () => {
                   <label htmlFor="category" className="form-label">
                     Main Category <span className="text-danger">*</span>
                   </label>
-                  <select
-                    id="category"
-                    disabled={isSubmitting}
-                    className={`form-select ${errors.category ? 'is-invalid' : ''}`}
-                    value={category}
-                    onChange={handleCategoryChange}
-                  >
-                    <option value="">Select Category</option>
-                    {Object.keys(PRODUCT_CATEGORIES).map((catKey) => (
-                      <option key={catKey} value={catKey}>
-                        {catKey}
-                      </option>
-                    ))}
-                  </select>
-                  {errors.category && <div className="field-error">{errors.category}</div>}
+                  {(() => {
+                    const { onChange, ...categoryRest } = register('category', {
+                      required: 'Please select a main category',
+                      validate: (value) => (value ? true : 'Please select a main category')
+                    });
+                    return (
+                      <select
+                        id="category"
+                        disabled={isSubmitting}
+                        className={`form-select ${errors.category ? 'is-invalid' : ''}`}
+                        {...categoryRest}
+                        onChange={(e) => {
+                          onChange(e);
+                          handleCategoryChange(e);
+                        }}
+                      >
+                        <option value="">Select Category</option>
+                        {Object.keys(PRODUCT_CATEGORIES).map((catKey) => (
+                          <option key={catKey} value={catKey}>
+                            {catKey}
+                          </option>
+                        ))}
+                      </select>
+                    );
+                  })()}
+                  {errors.category && <div className="field-error">{errors.category.message}</div>}
                 </div>
 
                 <div className="col-md-6">
@@ -278,26 +276,27 @@ const AddProduct: React.FC = () => {
                   </label>
                   <select
                     id="subcategory"
-                    disabled={isSubmitting || !category}
+                    disabled={isSubmitting || !selectedCategory}
                     className={`form-select ${errors.subcategory ? 'is-invalid' : ''}`}
-                    value={subcategory}
-                    onChange={(e) => {
-                      setSubcategory(e.target.value);
-                      if (errors.subcategory) setErrors((prev) => ({ ...prev, subcategory: undefined }));
-                      if (serverError) setServerError(null);
-                    }}
+                    {...register('subcategory', {
+                      required: 'Please select a subcategory',
+                      validate: (value) => (value ? true : 'Please select a subcategory'),
+                      onChange: () => {
+                        if (serverError) setServerError(null);
+                      }
+                    })}
                   >
                     <option value="">
-                      {category ? 'Select Subcategory' : 'Select Category first'}
+                      {selectedCategory ? 'Select Subcategory' : 'Select Category first'}
                     </option>
-                    {category &&
-                      PRODUCT_CATEGORIES[category]?.map((sub) => (
+                    {selectedCategory &&
+                      PRODUCT_CATEGORIES[selectedCategory as CategoryName]?.map((sub) => (
                         <option key={sub} value={sub}>
                           {sub}
                         </option>
                       ))}
                   </select>
-                  {errors.subcategory && <div className="field-error">{errors.subcategory}</div>}
+                  {errors.subcategory && <div className="field-error">{errors.subcategory.message}</div>}
                 </div>
               </div>
 
@@ -315,15 +314,23 @@ const AddProduct: React.FC = () => {
                     className={`form-control ${errors.price ? 'is-invalid' : ''}`}
                     placeholder="Enter expected amount in INR"
                     min="1"
-                    value={price}
-                    onChange={(e) => {
-                      setPrice(e.target.value);
-                      if (errors.price) setErrors((prev) => ({ ...prev, price: undefined }));
-                      if (serverError) setServerError(null);
-                    }}
+                    {...register('price', {
+                      required: 'Price is required',
+                      validate: (value) => {
+                        if (!value || !value.toString().trim()) return 'Price is required';
+                        const numPrice = Number(value);
+                        if (Number.isNaN(numPrice) || numPrice <= 0) {
+                          return 'Price must be a positive number greater than 0';
+                        }
+                        return true;
+                      },
+                      onChange: () => {
+                        if (serverError) setServerError(null);
+                      }
+                    })}
                   />
                 </div>
-                {errors.price && <div className="field-error">{errors.price}</div>}
+                {errors.price && <div className="field-error">{errors.price.message}</div>}
               </div>
 
               {/* Description */}
@@ -337,14 +344,19 @@ const AddProduct: React.FC = () => {
                   disabled={isSubmitting}
                   className={`form-control ${errors.description ? 'is-invalid' : ''}`}
                   placeholder="Mention key details such as device condition, battery health, purchase date, included accessories, or warranty..."
-                  value={description}
-                  onChange={(e) => {
-                    setDescription(e.target.value);
-                    if (errors.description) setErrors((prev) => ({ ...prev, description: undefined }));
-                    if (serverError) setServerError(null);
-                  }}
+                  {...register('description', {
+                    required: 'Product description is required',
+                    validate: (value) => {
+                      if (!value.trim()) return 'Product description is required';
+                      if (value.trim().length < 15) return 'Description must be at least 15 characters long';
+                      return true;
+                    },
+                    onChange: () => {
+                      if (serverError) setServerError(null);
+                    }
+                  })}
                 />
-                {errors.description && <div className="field-error">{errors.description}</div>}
+                {errors.description && <div className="field-error">{errors.description.message}</div>}
               </div>
 
               {/* Image Upload Section */}
@@ -383,7 +395,7 @@ const AddProduct: React.FC = () => {
                   </div>
                 </div>
 
-                {errors.images && <div className="field-error mb-2">{errors.images}</div>}
+                {imageError && <div className="field-error mb-2">{imageError}</div>}
 
                 {/* Image Previews Grid */}
                 {images.length > 0 && (
