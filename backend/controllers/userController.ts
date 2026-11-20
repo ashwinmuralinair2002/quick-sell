@@ -107,6 +107,61 @@ export const updateUserProfile = async (
     }
 };
 
+// VERIFY CURRENT PASSWORD
+export const verifyCurrentPassword = async (
+    req: Request,
+    res: Response
+): Promise<void> => {
+    try {
+        if (!req.userId) {
+            res.status(401).json({
+                message: 'Authentication required'
+            });
+            return;
+        }
+
+        const { currentPassword } = req.body;
+
+        if (!currentPassword || typeof currentPassword !== 'string') {
+            res.status(400).json({
+                message: 'Current password is required'
+            });
+            return;
+        }
+
+        const user = await User.findById(req.userId);
+
+        if (!user) {
+            res.status(404).json({
+                message: 'User not found'
+            });
+            return;
+        }
+
+        const isPasswordValid = await bcrypt.compare(currentPassword, user.password);
+
+        if (!isPasswordValid) {
+            res.status(400).json({
+                message: 'Incorrect current password'
+            });
+            return;
+        }
+
+        res.status(200).json({
+            message: 'Current password verified'
+        });
+
+    } catch (error: unknown) {
+        const errorMessage = error instanceof Error
+            ? error.message
+            : String(error);
+
+        res.status(500).json({
+            message: errorMessage
+        });
+    }
+};
+
 // CHANGE PASSWORD
 export const changePassword = async (
     req: Request,

@@ -3,10 +3,7 @@ import axios from 'axios';
 // Base Axios instance configured for QuickSell backend
 const api = axios.create({
   baseURL: 'http://localhost:5000',
-  withCredentials: true, // Necessary to send and receive HTTP-only cookies (e.g. refreshToken)
-  headers: {
-    'Content-Type': 'application/json'
-  }
+  withCredentials: true // Necessary to send and receive HTTP-only cookies (e.g. refreshToken)
 });
 
 // In-memory token storage getter and setter
@@ -25,6 +22,10 @@ api.interceptors.request.use(
   (config) => {
     if (memoryAccessToken && config.headers) {
       config.headers.Authorization = `Bearer ${memoryAccessToken}`;
+    }
+    // Only set Content-Type to application/json if not sending FormData
+    if (!(config.data instanceof FormData) && config.headers && !config.headers['Content-Type']) {
+      config.headers['Content-Type'] = 'application/json';
     }
     return config;
   },

@@ -13,6 +13,7 @@ interface AuthContextType {
   isLoading: boolean;
   login: (userData: User, token: string) => void;
   logout: () => Promise<void>;
+  updateUser: (updatedUser: Partial<User>) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -31,6 +32,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const login = (userData: User, token: string) => {
     updateAuth(userData, token);
+  };
+
+  const updateUser = (updatedFields: Partial<User>) => {
+    setUser((prev) => (prev ? { ...prev, ...updatedFields } : null));
   };
 
   const logout = async () => {
@@ -78,7 +83,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         accessToken: accessTokenState,
         isLoading,
         login,
-        logout
+        logout,
+        updateUser
       }}
     >
       {children}
