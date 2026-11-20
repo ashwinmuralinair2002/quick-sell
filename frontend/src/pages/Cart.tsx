@@ -1,96 +1,45 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Navbar from '../components/Navbar';
-import api from '../api/axios';
-import { useCart } from '../context/CartContext';
-import axios from 'axios';
-
-interface CartItem {
-  _id: string;
-  title: string;
-  description: string;
-  price: number;
-  category: string;
-  subcategory: string;
-  images: Array<{ url: string; public_id: string }> | string[];
-  seller?: {
-    _id: string;
-    name: string;
-    email: string;
-  };
-  status: string;
-  isAvailable: boolean;
-}
-
-interface CartResponse {
-  items: CartItem[];
-  itemCount: number;
-  subtotal: number;
-  gstAmount: number;
-  grandTotal: number;
-  message?: string;
-}
+import { useAppDispatch, useAppSelector } from '../store/hooks';
+import { fetchCart, removeFromCart } from '../store/cartSlice';
+import type { CartItem } from '../store/cartSlice';
 
 const Cart: React.FC = () => {
   const navigate = useNavigate();
-  const { setCartItemCount } = useCart();
+  const dispatch = useAppDispatch();
+  const {
+    items,
+    itemCount,
+    subtotal,
+    gstAmount,
+    grandTotal,
+    isLoading,
+    error: errorMessage
+  } = useAppSelector((state) => state.cart);
 
-  // Cart State
-  const [cart, setCart] = useState<CartResponse | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // Local component UI state
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
 
-  // Fetch Cart from GET /api/cart
-  const fetchCart = async () => {
-    setIsLoading(true);
-    setErrorMessage(null);
-
-    try {
-      const response = await api.get<CartResponse>('/api/cart');
-      setCart(response.data);
-      if (typeof response.data.itemCount === 'number') {
-        setCartItemCount(response.data.itemCount);
-      }
-    } catch (err: unknown) {
-      if (axios.isAxiosError(err) && err.response?.data?.message) {
-        setErrorMessage(err.response.data.message);
-      } else {
-        setErrorMessage('Failed to load your cart. Please try again.');
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   useEffect(() => {
-    fetchCart();
-  }, []);
+    dispatch(fetchCart());
+  }, [dispatch]);
 
   // Handle Remove Item via DELETE /api/cart/items/:productId
   const handleRemoveItem = async (productId: string) => {
     setRemovingId(productId);
     setActionSuccess(null);
-    setErrorMessage(null);
 
     try {
-      const response = await api.delete<CartResponse>(`/api/cart/items/${productId}`);
-      setCart(response.data);
-      if (typeof response.data.itemCount === 'number') {
-        setCartItemCount(response.data.itemCount);
-      }
-      setActionSuccess(response.data.message || 'Item removed from cart');
+      const response = await dispatch(removeFromCart(productId)).unwrap();
+      setActionSuccess(response.message || 'Item removed from cart');
 
       setTimeout(() => {
         setActionSuccess(null);
       }, 2500);
-    } catch (err: unknown) {
-      if (axios.isAxiosError(err) && err.response?.data?.message) {
-        setErrorMessage(err.response.data.message);
-      } else {
-        setErrorMessage('Failed to remove item from cart.');
-      }
+    } catch {
+      // Error message is stored in Redux or caught locally
     } finally {
       setRemovingId(null);
     }
@@ -129,9 +78,9 @@ const Cart: React.FC = () => {
         {/* Page Title */}
         <div className="d-flex align-items-center justify-content-between mb-4">
           <h2 className="fw-bold text-slate-800 mb-0">Your Shopping Cart</h2>
-          {cart && cart.itemCount > 0 && (
+          {itemCount > 0 && (
             <span className="badge bg-primary bg-opacity-10 text-primary px-3 py-2 rounded-pill">
-              {cart.itemCount} {cart.itemCount === 1 ? 'item' : 'items'}
+              {itemCount} {itemCount === 1 ? 'item' : 'items'}
             </span>
           )}
         </div>
@@ -160,7 +109,7 @@ const Cart: React.FC = () => {
         )}
 
         {/* Empty Cart State */}
-        {!isLoading && (!cart || cart.items.length === 0) && (
+        {!isLoading && items.length === 0 && (
           <div className="card border-0 shadow-sm p-5 text-center my-4 mx-auto rounded-4" style={{ maxWidth: '600px' }}>
             <div className="mb-3" style={{ fontSize: '3rem' }}>🛒</div>
             <h4 className="fw-bold text-slate-800 mb-2">Your Cart is Empty</h4>
@@ -176,13 +125,13 @@ const Cart: React.FC = () => {
         )}
 
         {/* Cart Contents */}
-        {!isLoading && cart && cart.items.length > 0 && (
+        {!isLoading && items.length > 0 && (
           <div className="row g-4">
             {/* Cart Items List (Left Column) */}
             <div className="col-12 col-lg-8">
               <div className="card border-0 shadow-sm rounded-4 p-3 bg-white mb-3">
                 <div className="table-responsive">
-                  {cart.items.map((item) => {
+                  {items.map((item) => {
                     const imgUrl = getItemImageUrl(item);
 
                     return (
@@ -266,33 +215,32 @@ const Cart: React.FC = () => {
 
                 <div className="d-flex justify-content-between mb-2 text-muted small">
                   <span>Available Items</span>
-                  <span className="fw-semibold text-dark">{cart.itemCount}</span>
+                  <span className="fw-semibold text-dark">{itemCount}</span>
                 </div>
 
                 <div className="d-flex justify-content-between mb-2 text-muted small">
                   <span>Subtotal</span>
-                  <span className="fw-semibold text-dark">₹{formatINR(cart.subtotal)}</span>
+                  <span className="fw-semibold text-dark">₹{formatINR(subtotal)}</span>
                 </div>
 
                 <div className="d-flex justify-content-between mb-3 text-muted small">
                   <span>GST (18%)</span>
-                  <span className="fw-semibold text-dark">₹{formatINR(cart.gstAmount)}</span>
+                  <span className="fw-semibold text-dark">₹{formatINR(gstAmount)}</span>
                 </div>
 
                 <hr className="my-2 opacity-25" />
 
                 <div className="d-flex justify-content-between mb-4 mt-2">
                   <span className="fw-bold fs-5 text-slate-800">Grand Total</span>
-                  <span className="fw-bold fs-5 text-primary">₹{formatINR(cart.grandTotal)}</span>
+                  <span className="fw-bold fs-5 text-primary">₹{formatINR(grandTotal)}</span>
                 </div>
 
                 {/* Checkout Button */}
                 <button
                   type="button"
                   className="btn btn-primary-custom w-100 py-2 fw-semibold"
-                  disabled={cart.itemCount === 0}
+                  disabled={itemCount === 0}
                   onClick={() => {
-                    // Placeholder navigation for checkout phase
                     navigate('/checkout');
                   }}
                 >

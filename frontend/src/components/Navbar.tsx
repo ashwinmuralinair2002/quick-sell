@@ -2,12 +2,11 @@ import React from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { logout } from '../store/authSlice';
-import { useCart } from '../context/CartContext';
 
 const Navbar: React.FC = () => {
   const dispatch = useAppDispatch();
   const user = useAppSelector((state) => state.auth.user);
-  const { cartItemCount } = useCart();
+  const cartItemCount = useAppSelector((state) => state.cart.itemCount);
   const navigate = useNavigate();
 
   const handleLogout = async () => {

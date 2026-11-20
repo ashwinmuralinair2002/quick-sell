@@ -1,11 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import Navbar from '../components/Navbar';
-import api from '../api/axios';
-import axios from 'axios';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { fetchProductById, updateProduct, deleteProduct, clearSelectedProduct } from '../store/productSlice';
-import { useCart } from '../context/CartContext';
+import { addToCart, removeFromCart } from '../store/cartSlice';
 
 const PRODUCT_CATEGORIES = {
   Mobiles: ['Smartphones', 'Tablets', 'Feature Phones'],
@@ -32,14 +30,6 @@ interface ImagePreview {
   previewUrl: string;
 }
 
-interface CartItemResponse {
-  _id: string;
-}
-
-interface CartApiResponse {
-  items: CartItemResponse[];
-}
-
 const ProductDetails: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -48,13 +38,13 @@ const ProductDetails: React.FC = () => {
   const { selectedProduct: product, isLoading, error: errorMessage } = useAppSelector(
     (state) => state.products
   );
-  const { refreshCartCount } = useCart();
+  const cartItems = useAppSelector((state) => state.cart.items);
+  const isInCart = Boolean(id && cartItems.some((item) => item._id === id));
 
   // Selected image index
   const [selectedImageIndex, setSelectedImageIndex] = useState<number>(0);
 
-  // Cart Membership & Action States
-  const [isInCart, setIsInCart] = useState<boolean>(false);
+  // Cart Action Feedback States
   const [isCartActionLoading, setIsCartActionLoading] = useState<boolean>(false);
   const [cartActionError, setCartActionError] = useState<string | null>(null);
   const [cartActionSuccess, setCartActionSuccess] = useState<string | null>(null);
@@ -78,7 +68,7 @@ const ProductDetails: React.FC = () => {
   const [isMarkingSold, setIsMarkingSold] = useState<boolean>(false);
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
 
-  // Fetch product from Redux fetchProductById and check cart status from GET /api/cart
+  // Fetch product from Redux fetchProductById
   useEffect(() => {
     if (!id) return;
 
@@ -89,31 +79,10 @@ const ProductDetails: React.FC = () => {
     // Fetch product details into Redux
     dispatch(fetchProductById(id));
 
-    // Fetch cart membership if user is logged in
-    const checkCartStatus = async () => {
-      if (!user) {
-        setIsInCart(false);
-        return;
-      }
-      try {
-        const cartResponse = await api.get<CartApiResponse>('/api/cart');
-        if (cartResponse && cartResponse.data && Array.isArray(cartResponse.data.items)) {
-          const itemExists = cartResponse.data.items.some((item) => item._id === id);
-          setIsInCart(itemExists);
-        } else {
-          setIsInCart(false);
-        }
-      } catch {
-        setIsInCart(false);
-      }
-    };
-
-    checkCartStatus();
-
     return () => {
       dispatch(clearSelectedProduct());
     };
-  }, [id, user, dispatch]);
+  }, [id, dispatch]);
 
   // Sync edit form fields when product is loaded / updated
   useEffect(() => {
@@ -131,15 +100,17 @@ const ProductDetails: React.FC = () => {
     product && typeof product.seller === 'object' && product.seller !== null
       ? product.seller._id
       : product && typeof product.seller === 'string'
-      ? product.seller
-      : '';
+        ? product.seller
+        : '';
 
   const isOwner = Boolean(user?.id && sellerId && user.id === sellerId);
   const isSold = product?.status === 'sold';
 
   // Image helpers
   const getImageUrls = (): string[] => {
-    if (!product || !Array.isArray(product.images)) return [];
+    if (!product || !Array.isArray(product.images) || product.images.length === 0) {
+      return [];
+    }
     return product.images.map((img) => {
       if (typeof img === 'string') return img;
       if (img && typeof img.url === 'string') return img.url;
@@ -170,25 +141,19 @@ const ProductDetails: React.FC = () => {
 
     try {
       if (isInCart) {
-        // Product is already in cart -> Remove from Cart (DELETE /api/cart/items/:productId)
-        const response = await api.delete(`/api/cart/items/${product._id}`);
-        setIsInCart(false);
-        setCartActionSuccess(response.data.message || 'Product removed from your cart.');
-        await refreshCartCount();
+        // Product is already in cart -> Remove from Cart via Redux thunk
+        const response = await dispatch(removeFromCart(product._id)).unwrap();
+        setCartActionSuccess(response.message || 'Product removed from your cart.');
       } else {
-        // Product is not in cart -> Add to Cart (POST /api/cart/items)
+        // Product is not in cart -> Add to Cart via Redux thunk
         if (product.status === 'sold') {
           setCartActionError('This product has already been sold.');
           setIsCartActionLoading(false);
           return;
         }
 
-        const response = await api.post('/api/cart/items', {
-          productId: product._id
-        });
-        setIsInCart(true);
-        setCartActionSuccess(response.data.message || 'Product added to your cart!');
-        await refreshCartCount();
+        const response = await dispatch(addToCart(product._id)).unwrap();
+        setCartActionSuccess(response.message || 'Product added to your cart!');
       }
 
       // Auto-clear success notification after 3 seconds
@@ -196,8 +161,10 @@ const ProductDetails: React.FC = () => {
         setCartActionSuccess(null);
       }, 3000);
     } catch (err: unknown) {
-      if (axios.isAxiosError(err) && err.response?.data?.message) {
-        setCartActionError(err.response.data.message);
+      if (typeof err === 'string') {
+        setCartActionError(err);
+      } else if (err instanceof Error) {
+        setCartActionError(err.message);
       } else {
         setCartActionError('Failed to update cart. Please try again.');
       }
@@ -252,35 +219,36 @@ const ProductDetails: React.FC = () => {
     const newErrors: EditFormErrors = {};
 
     if (!editTitle.trim()) {
-      newErrors.title = 'Title is required';
+      newErrors.title = 'Product title is required';
     } else if (editTitle.trim().length < 5) {
-      newErrors.title = 'Title must be at least 5 characters';
+      newErrors.title = 'Title must be at least 5 characters long';
     }
 
     if (!editDescription.trim()) {
-      newErrors.description = 'Description is required';
+      newErrors.description = 'Product description is required';
     } else if (editDescription.trim().length < 15) {
-      newErrors.description = 'Description must be at least 15 characters';
+      newErrors.description = 'Description must be at least 15 characters long';
     }
 
-    const numPrice = Number(editPrice);
     if (!editPrice.trim()) {
-      newErrors.price = 'Price is required';
-    } else if (Number.isNaN(numPrice) || numPrice <= 0) {
-      newErrors.price = 'Price must be a positive number';
+      newErrors.price = 'Selling price is required';
+    } else {
+      const parsedPrice = Number(editPrice);
+      if (Number.isNaN(parsedPrice) || parsedPrice <= 0) {
+        newErrors.price = 'Please enter a valid positive selling price';
+      }
     }
 
     if (!editCategory) {
-      newErrors.category = 'Category is required';
+      newErrors.category = 'Please select a main category';
     }
 
     if (!editSubcategory) {
-      newErrors.subcategory = 'Subcategory is required';
+      newErrors.subcategory = 'Please select a subcategory';
     }
 
-    // Backend rule: if new images are provided to replace old ones, at least 2 are required
     if (newImages.length > 0 && newImages.length < 2) {
-      newErrors.images = 'When replacing images, at least 2 images are required (max 5)';
+      newErrors.images = 'If replacing photos, at least 2 images are required (maximum 5)';
     }
 
     setEditErrors(newErrors);
@@ -404,102 +372,121 @@ const ProductDetails: React.FC = () => {
           </Link>
         </div>
 
-        {/* Loading State */}
-        {isLoading && (
-          <div className="py-5 text-center my-4">
-            <div className="spinner-border text-primary" role="status">
-              <span className="visually-hidden">Loading product...</span>
-            </div>
-            <p className="text-muted mt-3 small">Loading listing details...</p>
-          </div>
-        )}
-
-        {/* Error / Not Found State */}
-        {!isLoading && (errorMessage || !product) && (
-          <div className="card border-0 shadow-sm p-5 text-center my-4 mx-auto" style={{ maxWidth: '600px' }}>
-            <div className="mb-2" style={{ fontSize: '2.5rem' }}>🔍</div>
-            <h5 className="fw-bold text-slate-800 mb-2">Product Not Found</h5>
-            <p className="text-muted small mb-3">
-              {errorMessage || 'The product you are looking for does not exist or may have been removed.'}
-            </p>
+        {/* Global Action Alerts */}
+        {cartActionSuccess && (
+          <div className="alert alert-success d-flex align-items-center justify-content-between py-2 px-3 mb-3 small" role="alert">
             <div>
-              <Link to="/" className="btn btn-primary btn-sm px-4">
-                Browse Marketplace
-              </Link>
+              <span>✅ </span>
+              <strong>{cartActionSuccess}</strong>
             </div>
+            {isInCart && (
+              <Link to="/cart" className="alert-link small ms-2 fw-semibold">
+                View Cart &rarr;
+              </Link>
+            )}
           </div>
         )}
 
-        {/* Product Details View */}
+        {cartActionError && (
+          <div className="alert alert-danger py-2 px-3 mb-3 small" role="alert">
+            <span>⚠️ </span>
+            {cartActionError}
+          </div>
+        )}
+
+        {/* Loading Spinner */}
+        {isLoading && (
+          <div className="d-flex flex-column align-items-center justify-content-center py-5 my-5">
+            <div className="spinner-border text-primary mb-3" role="status" style={{ width: '3rem', height: '3rem' }}>
+              <span className="visually-hidden">Loading product details...</span>
+            </div>
+            <p className="text-muted small">Loading hardware specification & details...</p>
+          </div>
+        )}
+
+        {/* Error State */}
+        {!isLoading && (errorMessage || !product) && (
+          <div className="alert alert-danger py-4 px-4 text-center rounded-3 my-4">
+            <h5 className="fw-bold mb-2">Unable to Load Product</h5>
+            <p className="text-muted small mb-3">{errorMessage || 'The requested product could not be found or has been removed.'}</p>
+            <button
+              onClick={() => {
+                if (id) dispatch(fetchProductById(id));
+              }}
+              className="btn btn-primary btn-sm px-4 fw-semibold"
+            >
+              Try Again
+            </button>
+          </div>
+        )}
+
+        {/* Product Details Display (View Mode) */}
         {!isLoading && product && !isEditing && (
-          <div className="row g-4">
+          <div className="row g-4 g-lg-5">
             {/* Left Column: Image Gallery */}
             <div className="col-12 col-lg-7">
-              <div
-                className="card border-0 shadow-sm rounded-4 p-3 bg-white"
-                style={{ backgroundColor: isOwner ? '#FFF9E9' : '#ffffff' }}
-              >
-                {/* Main Large Image */}
+              <div className="card border-0 shadow-sm rounded-4 overflow-hidden bg-white p-3">
+                {/* Main Featured Image with Zoom View Container */}
                 <div
-                  className="rounded-3 overflow-hidden position-relative bg-light mb-3"
-                  style={{ height: '420px', width: '100%' }}
+                  className="rounded-3 overflow-hidden position-relative bg-light d-flex align-items-center justify-content-center mb-3"
+                  style={{ minHeight: '380px', maxHeight: '480px' }}
                 >
                   {currentMainImage ? (
                     <img
                       src={currentMainImage}
                       alt={product.title}
-                      className="w-100 h-100"
-                      style={{ objectFit: 'contain' }}
+                      className="img-fluid w-100"
+                      style={{
+                        objectFit: 'contain',
+                        maxHeight: '480px',
+                        transition: 'transform 0.25s ease'
+                      }}
                     />
                   ) : (
-                    <div className="w-100 h-100 d-flex align-items-center justify-content-center text-muted">
-                      No Image Available
+                    <div className="text-muted py-5">No image available</div>
+                  )}
+
+                  {/* Status Overlay Badge */}
+                  {isSold && (
+                    <div
+                      className="position-absolute top-0 start-0 m-3 badge bg-danger text-uppercase px-3 py-2 fw-bold shadow-sm"
+                      style={{ fontSize: '0.85rem', letterSpacing: '0.5px' }}
+                    >
+                      Sold Out
                     </div>
                   )}
 
-                  {/* Badges */}
-                  <div className="position-absolute top-0 start-0 m-3 d-flex gap-2">
-                    {isOwner && (
-                      <span
-                        className="badge px-3 py-2 rounded-2"
-                        style={{
-                          backgroundColor: '#f59e0b',
-                          color: '#ffffff',
-                          fontWeight: 700,
-                          fontSize: '0.825rem'
-                        }}
-                      >
-                        Your Listing
-                      </span>
-                    )}
-                    {isSold && (
-                      <span className="badge bg-danger px-3 py-2 rounded-2 fw-bold" style={{ fontSize: '0.825rem' }}>
-                        SOLD
-                      </span>
-                    )}
-                  </div>
-
-                  <span className="badge bg-dark bg-opacity-75 text-white position-absolute bottom-0 end-0 m-3 px-3 py-1 rounded-2">
-                    {product.category}
-                  </span>
+                  {/* Owner Indicator Overlay */}
+                  {isOwner && (
+                    <div
+                      className="position-absolute top-0 end-0 m-3 badge px-3 py-2 fw-bold shadow-sm"
+                      style={{
+                        backgroundColor: '#ffc107',
+                        color: '#000000',
+                        fontSize: '0.75rem',
+                        border: '1px solid #d39e00'
+                      }}
+                    >
+                      Your Listing
+                    </div>
+                  )}
                 </div>
 
                 {/* Thumbnail Strip */}
                 {imageUrls.length > 1 && (
-                  <div className="d-flex gap-2 overflow-auto pb-1">
+                  <div className="d-flex gap-2 overflow-auto pb-2">
                     {imageUrls.map((url, idx) => (
                       <button
                         key={idx}
                         type="button"
                         onClick={() => setSelectedImageIndex(idx)}
-                        className={`p-0 border rounded-2 overflow-hidden bg-white ${
-                          selectedImageIndex === idx ? 'border-primary border-2 shadow-sm' : 'border-light'
-                        }`}
-                        style={{ width: '80px', height: '80px', flexShrink: 0, cursor: 'pointer' }}
+                        className={`btn p-0 border-2 rounded-2 overflow-hidden flex-shrink-0 ${selectedImageIndex === idx ? 'border-primary' : 'border-light'
+                          }`}
+                        style={{ width: '70px', height: '70px' }}
                       >
                         <img
                           src={url}
-                          alt={`Thumbnail ${idx + 1}`}
+                          alt={`${product.title} thumbnail ${idx + 1}`}
                           className="w-100 h-100"
                           style={{ objectFit: 'cover' }}
                         />
@@ -510,480 +497,458 @@ const ProductDetails: React.FC = () => {
               </div>
             </div>
 
-            {/* Right Column: Product Information */}
+            {/* Right Column: Product Metadata, Pricing, Actions & Seller Info */}
             <div className="col-12 col-lg-5">
-              <div
-                className="card border-0 shadow-sm rounded-4 p-4 p-md-4 bg-white h-100 d-flex flex-column"
-                style={{ backgroundColor: isOwner ? '#FFF9E9' : '#ffffff' }}
-              >
-                {/* Category & Status Badges */}
-                <div className="d-flex align-items-center justify-content-between mb-2">
-                  <span className="small text-muted fw-semibold">
-                    {product.category} &rsaquo; {product.subcategory}
+              <div className="d-flex flex-column h-100">
+                {/* Category & Subcategory Tags */}
+                <div className="mb-2">
+                  <span className="badge bg-light text-dark border px-2 py-1 small me-2">
+                    {product.category}
                   </span>
-                  {isSold ? (
-                    <span className="badge bg-danger-subtle text-danger border border-danger-subtle fw-semibold">
-                      Sold Out
-                    </span>
-                  ) : (
-                    <span className="badge bg-light text-secondary border">Verified Tech</span>
-                  )}
+                  <span className="badge bg-light text-secondary border px-2 py-1 small">
+                    {product.subcategory}
+                  </span>
                 </div>
 
-                {/* Title */}
-                <h3 className="fw-bold text-slate-800 mb-2">{product.title}</h3>
+                {/* Product Title */}
+                <h1 className="fw-bold text-slate-800 mb-2 h3">
+                  {product.title}
+                </h1>
 
-                {/* Price */}
-                <div className="fs-2 fw-bold text-primary mb-3">
-                  ₹{new Intl.NumberFormat('en-IN').format(product.price)}
+                {/* Price Display */}
+                <div className="price-tag mb-3 fs-2 fw-bold text-primary">
+                  ₹{new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 }).format(product.price)}
                 </div>
 
-                <hr className="my-3 opacity-25" />
+                {/* Owner Manage Bar (Edit, Mark as Sold, Delete) */}
+                {isOwner && (
+                  <div className="owner-action-panel p-3 rounded-3 mb-4 bg-warning bg-opacity-10 border border-warning">
+                    <div className="small fw-semibold text-dark mb-2 d-flex align-items-center gap-1">
+                      <span>⚙️</span> Manage Your Listing:
+                    </div>
+                    <div className="d-flex flex-wrap gap-2">
+                      {/* Edit Button */}
+                      {!isSold && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsEditing(true);
+                            setUpdateError(null);
+                            setUpdateSuccess(null);
+                          }}
+                          className="btn btn-sm btn-outline-dark fw-semibold"
+                        >
+                          ✏️ Edit Listing
+                        </button>
+                      )}
 
-                {/* Description */}
-                <div className="mb-4">
-                  <h6 className="fw-bold text-slate-800 mb-2">Product Description</h6>
-                  <p className="text-secondary small" style={{ whiteSpace: 'pre-line', lineHeight: 1.6 }}>
+                      {/* Mark as Sold Button */}
+                      {!isSold && (
+                        <button
+                          type="button"
+                          onClick={() => setShowMarkSoldModal(true)}
+                          className="btn btn-sm btn-outline-success fw-semibold"
+                          disabled={isMarkingSold}
+                        >
+                          🏷️ Mark as Sold
+                        </button>
+                      )}
+
+                      {/* Delete Listing Button */}
+                      <button
+                        type="button"
+                        onClick={() => setShowDeleteModal(true)}
+                        className="btn btn-sm btn-outline-danger fw-semibold"
+                        disabled={isDeleting}
+                      >
+                        🗑️ Delete
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Primary Buyer Action: Add / Remove Cart */}
+                {!isOwner && (
+                  <div className="d-grid mb-4">
+                    <button
+                      type="button"
+                      onClick={handleCartAction}
+                      disabled={isCartActionLoading || (isSold && !isInCart)}
+                      className={`btn py-2 fw-semibold d-flex align-items-center justify-content-center gap-2 ${isInCart
+                          ? 'btn-danger'
+                          : isSold
+                            ? 'btn-secondary disabled'
+                            : 'btn-primary-custom'
+                        }`}
+                    >
+                      {isCartActionLoading ? (
+                        <>
+                          <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                          <span>Updating Cart...</span>
+                        </>
+                      ) : isInCart ? (
+                        <>
+                          <span>🛒</span>
+                          <span>Remove from Cart</span>
+                        </>
+                      ) : isSold ? (
+                        <span>Sold Out</span>
+                      ) : (
+                        <>
+                          <span>🛒</span>
+                          <span>Add to Cart</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                )}
+
+                {/* Hardware Description Section */}
+                <div className="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
+                  <h5 className="fw-bold text-slate-800 mb-2">Device Description</h5>
+                  <p
+                    className="text-muted small mb-0"
+                    style={{ whiteSpace: 'pre-line', lineHeight: '1.6' }}
+                  >
                     {product.description}
                   </p>
                 </div>
 
-                <hr className="my-3 opacity-25" />
-
-                {/* Seller Information */}
-                <div className="mb-4">
-                  <h6 className="fw-bold text-slate-800 mb-2">Seller Details</h6>
-                  {typeof product.seller === 'object' && product.seller !== null ? (
-                    <div className="p-3 bg-light rounded-3">
-                      <div className="fw-semibold text-slate-800">{product.seller.name}</div>
-                      <div className="text-muted small">{product.seller.email}</div>
-                    </div>
-                  ) : (
-                    <div className="text-muted small">Seller information available</div>
-                  )}
-                </div>
-
-                {/* Cart Action Feedback Alerts */}
-                {cartActionSuccess && (
-                  <div className="alert alert-success py-2 px-3 small mb-3">
-                    <strong>Success: </strong> {cartActionSuccess}
-                  </div>
-                )}
-
-                {cartActionError && (
-                  <div className="alert alert-danger py-2 px-3 small mb-3">
-                    <strong>Error: </strong> {cartActionError}
-                  </div>
-                )}
-
-                {/* Owner Actions (Directly below Seller Information) */}
-                <div className="mt-auto pt-2">
-                  {isOwner ? (
-                    isSold ? (
-                      <div className="alert alert-secondary py-3 px-3 small mb-0 text-center rounded-3">
-                        <div className="fw-bold mb-1">🏷️ Listing Marked as Sold</div>
-                        <div className="text-muted">
-                          This item has been marked as sold. Seller actions and buyer purchases are disabled.
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="d-flex flex-column gap-2">
-                        <div className="alert alert-warning py-2 px-3 small mb-2 d-flex align-items-center gap-2">
-                          <span>ℹ️</span> You are the seller of this listing.
-                        </div>
-
-                        {/* 1. Edit Product Button (Primary Blue) */}
-                        <button
-                          type="button"
-                          onClick={() => setIsEditing(true)}
-                          className="btn btn-primary w-100 py-2 fw-semibold"
-                        >
-                          ✏️ Edit Product
-                        </button>
-
-                        {/* 2. Mark as Sold Button (Yellow/Amber) */}
-                        <button
-                          type="button"
-                          onClick={() => setShowMarkSoldModal(true)}
-                          className="btn btn-warning w-100 py-2 fw-semibold text-dark"
-                          style={{ backgroundColor: '#f59e0b', borderColor: '#f59e0b', color: '#ffffff' }}
-                        >
-                          ✓ Mark as Sold
-                        </button>
-
-                        {/* 3. Delete Listing Button (Red) */}
-                        <button
-                          type="button"
-                          onClick={() => setShowDeleteModal(true)}
-                          className="btn btn-danger w-100 py-2 fw-semibold"
-                        >
-                          🗑️ Delete Listing
-                        </button>
-                      </div>
-                    )
-                  ) : isSold ? (
-                    <button className="btn btn-secondary w-100 py-2 fw-semibold" disabled>
-                      Sold Out
-                    </button>
-                  ) : (
-                    <button
-                      className={`btn w-100 py-2 fw-semibold ${
-                        isInCart ? 'btn-secondary text-white' : 'btn-primary-custom'
-                      }`}
-                      onClick={handleCartAction}
-                      disabled={isCartActionLoading}
+                {/* Verified Seller Information Card */}
+                <div className="card border-0 shadow-sm rounded-4 p-3 bg-white mt-auto">
+                  <h6 className="fw-bold text-slate-800 mb-2 d-flex align-items-center gap-1">
+                    <span>🛡️</span> Seller Information
+                  </h6>
+                  <div className="d-flex align-items-center gap-2">
+                    <div
+                      className="rounded-circle bg-primary bg-opacity-10 text-primary d-flex align-items-center justify-content-center fw-bold"
+                      style={{ width: '40px', height: '40px' }}
                     >
-                      {isCartActionLoading ? (
-                        <span className="d-flex align-items-center justify-content-center gap-2">
-                          <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-                          <span>{isInCart ? 'Removing from Cart...' : 'Adding to Cart...'}</span>
-                        </span>
-                      ) : isInCart ? (
-                        'Remove from Cart'
-                      ) : (
-                        'Add to Cart'
-                      )}
-                    </button>
-                  )}
+                      {product.seller && typeof product.seller === 'object' && product.seller.name
+                        ? product.seller.name.charAt(0).toUpperCase()
+                        : 'S'}
+                    </div>
+                    <div>
+                      <div className="fw-semibold text-slate-800 small">
+                        {product.seller && typeof product.seller === 'object' && product.seller.name
+                          ? product.seller.name
+                          : 'Verified Tech Enthusiast'}
+                      </div>
+                      <div className="text-muted small" style={{ fontSize: '0.75rem' }}>
+                        Member of QuickSell Marketplace
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
         )}
 
-        {/* Edit Form View (Only contains editing fields) */}
+        {/* Product Details Edit Form (Edit Mode) */}
         {!isLoading && product && isEditing && (
-          <div className="mx-auto" style={{ maxWidth: '720px' }}>
-            <div className="card border-0 shadow-sm rounded-4 p-4 p-md-5 bg-white">
-              <div className="d-flex justify-content-between align-items-center mb-4">
-                <div>
-                  <span className="badge-tech-tag bg-primary bg-opacity-10 text-primary mb-2">
-                    Edit Listing
-                  </span>
-                  <h2 className="fw-bold text-slate-800 mb-1">Update Product Details</h2>
-                  <p className="text-muted small mb-0">Modify your gadget's details and photos.</p>
+          <div className="card border-0 shadow-sm rounded-4 p-4 p-md-5 bg-white mx-auto" style={{ maxWidth: '780px' }}>
+            <div className="d-flex align-items-center justify-content-between mb-4 pb-2 border-bottom">
+              <div>
+                <h3 className="fw-bold text-slate-800 mb-1">Edit Product Listing</h3>
+                <p className="text-muted small mb-0">Update specifications, pricing, and photo gallery.</p>
+              </div>
+              <button
+                type="button"
+                className="btn btn-outline-secondary btn-sm px-3"
+                onClick={() => {
+                  setIsEditing(false);
+                  setNewImages([]);
+                }}
+                disabled={isUpdating}
+              >
+                Cancel
+              </button>
+            </div>
+
+            {/* Edit Success Message */}
+            {updateSuccess && (
+              <div className="alert alert-success py-2 px-3 small mb-3">
+                {updateSuccess}
+              </div>
+            )}
+
+            {/* Edit Error Alert */}
+            {updateError && (
+              <div className="alert alert-danger py-2 px-3 small mb-3">
+                {updateError}
+              </div>
+            )}
+
+            <form onSubmit={handleEditSubmit} noValidate>
+              {/* Product Title */}
+              <div className="mb-3">
+                <label htmlFor="editTitle" className="form-label small fw-semibold">
+                  Product Title <span className="text-danger">*</span>
+                </label>
+                <input
+                  type="text"
+                  id="editTitle"
+                  disabled={isUpdating}
+                  className={`form-control ${editErrors.title ? 'is-invalid' : ''}`}
+                  value={editTitle}
+                  onChange={(e) => {
+                    setEditTitle(e.target.value);
+                    if (editErrors.title) setEditErrors((prev) => ({ ...prev, title: undefined }));
+                  }}
+                />
+                {editErrors.title && <div className="field-error">{editErrors.title}</div>}
+              </div>
+
+              {/* Category & Subcategory Row */}
+              <div className="row g-3 mb-3">
+                <div className="col-md-6">
+                  <label htmlFor="editCategory" className="form-label small fw-semibold">
+                    Category <span className="text-danger">*</span>
+                  </label>
+                  <select
+                    id="editCategory"
+                    disabled={isUpdating}
+                    className={`form-select ${editErrors.category ? 'is-invalid' : ''}`}
+                    value={editCategory}
+                    onChange={handleEditCategoryChange}
+                  >
+                    <option value="">Select Category</option>
+                    {Object.keys(PRODUCT_CATEGORIES).map((catKey) => (
+                      <option key={catKey} value={catKey}>
+                        {catKey}
+                      </option>
+                    ))}
+                  </select>
+                  {editErrors.category && <div className="field-error">{editErrors.category}</div>}
                 </div>
+
+                <div className="col-md-6">
+                  <label htmlFor="editSubcategory" className="form-label small fw-semibold">
+                    Subcategory <span className="text-danger">*</span>
+                  </label>
+                  <select
+                    id="editSubcategory"
+                    disabled={isUpdating || !editCategory}
+                    className={`form-select ${editErrors.subcategory ? 'is-invalid' : ''}`}
+                    value={editSubcategory}
+                    onChange={(e) => {
+                      setEditSubcategory(e.target.value);
+                      if (editErrors.subcategory) setEditErrors((prev) => ({ ...prev, subcategory: undefined }));
+                    }}
+                  >
+                    <option value="">
+                      {editCategory ? 'Select Subcategory' : 'Select Category first'}
+                    </option>
+                    {editCategory &&
+                      PRODUCT_CATEGORIES[editCategory]?.map((sub) => (
+                        <option key={sub} value={sub}>
+                          {sub}
+                        </option>
+                      ))}
+                  </select>
+                  {editErrors.subcategory && <div className="field-error">{editErrors.subcategory}</div>}
+                </div>
+              </div>
+
+              {/* Price */}
+              <div className="mb-3">
+                <label htmlFor="editPrice" className="form-label small fw-semibold">
+                  Price (₹) <span className="text-danger">*</span>
+                </label>
+                <div className="input-group">
+                  <span className="input-group-text bg-light text-muted">₹</span>
+                  <input
+                    type="number"
+                    id="editPrice"
+                    disabled={isUpdating}
+                    className={`form-control ${editErrors.price ? 'is-invalid' : ''}`}
+                    min="1"
+                    value={editPrice}
+                    onChange={(e) => {
+                      setEditPrice(e.target.value);
+                      if (editErrors.price) setEditErrors((prev) => ({ ...prev, price: undefined }));
+                    }}
+                  />
+                </div>
+                {editErrors.price && <div className="field-error">{editErrors.price}</div>}
+              </div>
+
+              {/* Description */}
+              <div className="mb-4">
+                <label htmlFor="editDescription" className="form-label small fw-semibold">
+                  Description <span className="text-danger">*</span>
+                </label>
+                <textarea
+                  id="editDescription"
+                  rows={4}
+                  disabled={isUpdating}
+                  className={`form-control ${editErrors.description ? 'is-invalid' : ''}`}
+                  value={editDescription}
+                  onChange={(e) => {
+                    setEditDescription(e.target.value);
+                    if (editErrors.description) setEditErrors((prev) => ({ ...prev, description: undefined }));
+                  }}
+                />
+                {editErrors.description && <div className="field-error">{editErrors.description}</div>}
+              </div>
+
+              {/* Replace Images Section */}
+              <div className="mb-4">
+                <label className="form-label small fw-semibold d-flex justify-content-between align-items-center">
+                  <span>Replace Images (Optional)</span>
+                  <span className="small text-muted">Leave empty to keep existing photos</span>
+                </label>
+
+                <div className="border border-2 border-dashed rounded-3 p-3 text-center bg-light mb-2">
+                  <label
+                    className={`btn btn-outline-primary btn-sm px-3 mb-0 ${isUpdating || newImages.length >= 5 ? 'disabled' : ''}`}
+                    style={{ cursor: isUpdating || newImages.length >= 5 ? 'not-allowed' : 'pointer' }}
+                  >
+                    Select New Photos
+                    <input
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      className="d-none"
+                      onChange={handleNewImageChange}
+                      disabled={isUpdating || newImages.length >= 5}
+                    />
+                  </label>
+                  <div className="small text-muted mt-1" style={{ fontSize: '0.75rem' }}>
+                    Selecting new photos will replace all existing photos on Cloudinary (min 2, max 5).
+                  </div>
+                </div>
+
+                {editErrors.images && <div className="field-error mb-2">{editErrors.images}</div>}
+
+                {/* Previews of newly selected images */}
+                {newImages.length > 0 && (
+                  <div className="row g-2 mt-1">
+                    {newImages.map((img, index) => (
+                      <div key={index} className="col-4 col-sm-3 col-md-2 position-relative">
+                        <div className="border rounded-2 overflow-hidden position-relative bg-white" style={{ height: '70px' }}>
+                          <img src={img.previewUrl} alt={`New preview ${index + 1}`} className="w-100 h-100" style={{ objectFit: 'cover' }} />
+                          {!isUpdating && (
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveNewImage(index)}
+                              className="btn btn-danger btn-sm p-0 position-absolute top-0 end-0 m-1 rounded-circle d-flex align-items-center justify-content-center"
+                              style={{ width: '20px', height: '20px', fontSize: '10px' }}
+                            >
+                              ✕
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Form Buttons */}
+              <div className="d-flex gap-2">
+                <button
+                  type="submit"
+                  className="btn btn-primary btn-sm px-4 fw-semibold"
+                  disabled={isUpdating}
+                >
+                  {isUpdating ? 'Saving Changes...' : 'Save Changes'}
+                </button>
                 <button
                   type="button"
-                  onClick={() => setIsEditing(false)}
-                  className="btn btn-outline-secondary btn-sm"
+                  onClick={() => {
+                    setIsEditing(false);
+                    setNewImages([]);
+                  }}
+                  className="btn btn-outline-secondary btn-sm px-3 fw-semibold"
                   disabled={isUpdating}
                 >
                   Cancel
                 </button>
               </div>
-
-              {/* Success Alert */}
-              {updateSuccess && (
-                <div className="alert alert-success py-2 px-3 mb-3 small">
-                  <strong>Success: </strong> {updateSuccess}
-                </div>
-              )}
-
-              {/* Error Alert */}
-              {updateError && (
-                <div className="alert alert-danger py-2 px-3 mb-3 small">
-                  <strong>Error: </strong> {updateError}
-                </div>
-              )}
-
-              <form onSubmit={handleEditSubmit} noValidate>
-                {/* Title */}
-                <div className="mb-3">
-                  <label htmlFor="editTitle" className="form-label">
-                    Product Title <span className="text-danger">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    id="editTitle"
-                    disabled={isUpdating}
-                    className={`form-control ${editErrors.title ? 'is-invalid' : ''}`}
-                    value={editTitle}
-                    onChange={(e) => {
-                      setEditTitle(e.target.value);
-                      if (editErrors.title) setEditErrors((prev) => ({ ...prev, title: undefined }));
-                    }}
-                  />
-                  {editErrors.title && <div className="field-error">{editErrors.title}</div>}
-                </div>
-
-                {/* Category & Subcategory */}
-                <div className="row g-3 mb-3">
-                  <div className="col-md-6">
-                    <label htmlFor="editCategory" className="form-label">
-                      Category <span className="text-danger">*</span>
-                    </label>
-                    <select
-                      id="editCategory"
-                      disabled={isUpdating}
-                      className={`form-select ${editErrors.category ? 'is-invalid' : ''}`}
-                      value={editCategory}
-                      onChange={handleEditCategoryChange}
-                    >
-                      <option value="">Select Category</option>
-                      {Object.keys(PRODUCT_CATEGORIES).map((catKey) => (
-                        <option key={catKey} value={catKey}>
-                          {catKey}
-                        </option>
-                      ))}
-                    </select>
-                    {editErrors.category && <div className="field-error">{editErrors.category}</div>}
-                  </div>
-
-                  <div className="col-md-6">
-                    <label htmlFor="editSubcategory" className="form-label">
-                      Subcategory <span className="text-danger">*</span>
-                    </label>
-                    <select
-                      id="editSubcategory"
-                      disabled={isUpdating || !editCategory}
-                      className={`form-select ${editErrors.subcategory ? 'is-invalid' : ''}`}
-                      value={editSubcategory}
-                      onChange={(e) => {
-                        setEditSubcategory(e.target.value);
-                        if (editErrors.subcategory) setEditErrors((prev) => ({ ...prev, subcategory: undefined }));
-                      }}
-                    >
-                      <option value="">
-                        {editCategory ? 'Select Subcategory' : 'Select Category first'}
-                      </option>
-                      {editCategory &&
-                        PRODUCT_CATEGORIES[editCategory]?.map((sub) => (
-                          <option key={sub} value={sub}>
-                            {sub}
-                          </option>
-                        ))}
-                    </select>
-                    {editErrors.subcategory && <div className="field-error">{editErrors.subcategory}</div>}
-                  </div>
-                </div>
-
-                {/* Price */}
-                <div className="mb-3">
-                  <label htmlFor="editPrice" className="form-label">
-                    Price (₹) <span className="text-danger">*</span>
-                  </label>
-                  <div className="input-group">
-                    <span className="input-group-text bg-light text-muted">₹</span>
-                    <input
-                      type="number"
-                      id="editPrice"
-                      disabled={isUpdating}
-                      className={`form-control ${editErrors.price ? 'is-invalid' : ''}`}
-                      value={editPrice}
-                      onChange={(e) => {
-                        setEditPrice(e.target.value);
-                        if (editErrors.price) setEditErrors((prev) => ({ ...prev, price: undefined }));
-                      }}
-                    />
-                  </div>
-                  {editErrors.price && <div className="field-error">{editErrors.price}</div>}
-                </div>
-
-                {/* Description */}
-                <div className="mb-4">
-                  <label htmlFor="editDescription" className="form-label">
-                    Description <span className="text-danger">*</span>
-                  </label>
-                  <textarea
-                    id="editDescription"
-                    rows={4}
-                    disabled={isUpdating}
-                    className={`form-control ${editErrors.description ? 'is-invalid' : ''}`}
-                    value={editDescription}
-                    onChange={(e) => {
-                      setEditDescription(e.target.value);
-                      if (editErrors.description) setEditErrors((prev) => ({ ...prev, description: undefined }));
-                    }}
-                  />
-                  {editErrors.description && <div className="field-error">{editErrors.description}</div>}
-                </div>
-
-                {/* Replace Images Section */}
-                <div className="mb-4">
-                  <label className="form-label d-flex justify-content-between align-items-center">
-                    <span>Replace Images (Optional)</span>
-                    <span className="small text-muted">
-                      {newImages.length > 0 ? `${newImages.length}/5 new photos` : 'Keep existing images'}
-                    </span>
-                  </label>
-
-                  <div className="border border-2 border-dashed rounded-3 p-3 text-center bg-light mb-3">
-                    <p className="small text-muted mb-2">
-                      Upload new photos only if you want to replace current listing images (minimum 2, maximum 5).
-                    </p>
-                    <label
-                      className={`btn btn-outline-secondary btn-sm px-3 mb-0 ${isUpdating || newImages.length >= 5 ? 'disabled' : ''}`}
-                      style={{ cursor: isUpdating || newImages.length >= 5 ? 'not-allowed' : 'pointer' }}
-                    >
-                      Select New Photos
-                      <input
-                        type="file"
-                        accept="image/*"
-                        multiple
-                        className="d-none"
-                        onChange={handleNewImageChange}
-                        disabled={isUpdating || newImages.length >= 5}
-                      />
-                    </label>
-                  </div>
-
-                  {editErrors.images && <div className="field-error mb-2">{editErrors.images}</div>}
-
-                  {/* New Previews */}
-                  {newImages.length > 0 && (
-                    <div className="row g-2">
-                      {newImages.map((img, idx) => (
-                        <div key={idx} className="col-4 col-sm-3 col-md-2 position-relative">
-                          <div className="border rounded-2 overflow-hidden position-relative" style={{ height: '80px' }}>
-                            <img src={img.previewUrl} alt="New Preview" className="w-100 h-100" style={{ objectFit: 'cover' }} />
-                            {!isUpdating && (
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveNewImage(idx)}
-                                className="btn btn-danger btn-sm p-0 position-absolute top-0 end-0 m-1 rounded-circle"
-                                style={{ width: '20px', height: '20px', fontSize: '10px' }}
-                              >
-                                ✕
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* Actions */}
-                <div className="d-flex gap-2">
-                  <button
-                    type="submit"
-                    className="btn btn-primary flex-grow-1"
-                    disabled={isUpdating}
-                  >
-                    {isUpdating ? (
-                      <span className="d-flex align-items-center justify-content-center gap-2">
-                        <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-                        <span>Saving Changes...</span>
-                      </span>
-                    ) : (
-                      'Save Changes'
-                    )}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsEditing(false);
-                      setNewImages([]);
-                    }}
-                    className="btn btn-outline-secondary px-4"
-                    disabled={isUpdating}
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </form>
-            </div>
+            </form>
           </div>
         )}
       </main>
 
-      {/* SweetAlert-Style Bootstrap Confirmation Modal: Mark as Sold */}
+      {/* Confirmation Modal 1: Mark as Sold */}
       {showMarkSoldModal && (
         <div
-          className="modal fade show d-block"
-          tabIndex={-1}
-          role="dialog"
-          style={{ backgroundColor: 'rgba(0, 0, 0, 0.55)', backdropFilter: 'blur(3px)' }}
+          className="modal-backdrop-custom d-flex align-items-center justify-content-center"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            zIndex: 1050
+          }}
         >
-          <div className="modal-dialog modal-dialog-centered" style={{ maxWidth: '440px' }}>
-            <div className="modal-content border-0 shadow-lg rounded-4 p-4 text-center">
-              <div
-                className="mx-auto rounded-circle d-flex align-items-center justify-content-center mb-3"
-                style={{ width: '64px', height: '64px', backgroundColor: '#fef3c7', color: '#d97706', fontSize: '28px' }}
-              >
-                🏷️
-              </div>
-              <h4 className="fw-bold text-slate-800 mb-2">Mark as Sold?</h4>
-              <p className="text-muted small mb-4">
-                Are you sure you want to mark this item as <strong>SOLD</strong>? Once marked as sold, it cannot be purchased and will no longer appear in the marketplace.
+          <div className="card border-0 shadow-lg rounded-4 p-4 bg-white" style={{ maxWidth: '420px', width: '90%' }}>
+            <div className="text-center mb-3">
+              <div className="display-5 mb-2">🏷️</div>
+              <h5 className="fw-bold text-slate-800">Mark Product as Sold?</h5>
+              <p className="text-muted small">
+                Are you sure you want to mark "<strong>{product?.title}</strong>" as SOLD? This action will disable further inquiries and purchases.
               </p>
-              <div className="d-flex gap-2">
-                <button
-                  type="button"
-                  className="btn btn-light flex-grow-1 py-2 fw-semibold border"
-                  onClick={() => setShowMarkSoldModal(false)}
-                  disabled={isMarkingSold}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-warning flex-grow-1 py-2 fw-semibold text-dark"
-                  style={{ backgroundColor: '#f59e0b', borderColor: '#f59e0b', color: '#ffffff' }}
-                  onClick={handleConfirmMarkAsSold}
-                  disabled={isMarkingSold}
-                >
-                  {isMarkingSold ? (
-                    <span className="d-flex align-items-center justify-content-center gap-2">
-                      <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-                      <span>Marking...</span>
-                    </span>
-                  ) : (
-                    'Yes, Mark as Sold'
-                  )}
-                </button>
-              </div>
+            </div>
+            <div className="d-flex gap-2 justify-content-center">
+              <button
+                type="button"
+                className="btn btn-outline-secondary btn-sm px-3"
+                onClick={() => setShowMarkSoldModal(false)}
+                disabled={isMarkingSold}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-success btn-sm px-3 fw-semibold"
+                onClick={handleConfirmMarkAsSold}
+                disabled={isMarkingSold}
+              >
+                {isMarkingSold ? 'Updating...' : 'Yes, Mark as Sold'}
+              </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* SweetAlert-Style Bootstrap Confirmation Modal: Delete Listing */}
+      {/* Confirmation Modal 2: Delete Listing */}
       {showDeleteModal && (
         <div
-          className="modal fade show d-block"
-          tabIndex={-1}
-          role="dialog"
-          style={{ backgroundColor: 'rgba(0, 0, 0, 0.55)', backdropFilter: 'blur(3px)' }}
+          className="modal-backdrop-custom d-flex align-items-center justify-content-center"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            zIndex: 1050
+          }}
         >
-          <div className="modal-dialog modal-dialog-centered" style={{ maxWidth: '440px' }}>
-            <div className="modal-content border-0 shadow-lg rounded-4 p-4 text-center">
-              <div
-                className="mx-auto rounded-circle d-flex align-items-center justify-content-center mb-3"
-                style={{ width: '64px', height: '64px', backgroundColor: '#fee2e2', color: '#dc2626', fontSize: '28px' }}
-              >
-                🗑️
-              </div>
-              <h4 className="fw-bold text-slate-800 mb-2">Delete Listing?</h4>
-              <p className="text-muted small mb-4">
-                Are you sure you want to delete this listing? <strong>This action is permanent</strong> and will immediately delete all product details and photos from Cloudinary.
+          <div className="card border-0 shadow-lg rounded-4 p-4 bg-white" style={{ maxWidth: '420px', width: '90%' }}>
+            <div className="text-center mb-3">
+              <div className="display-5 mb-2">🗑️</div>
+              <h5 className="fw-bold text-danger">Delete Product Listing?</h5>
+              <p className="text-muted small">
+                Are you sure you want to permanently delete "<strong>{product?.title}</strong>"? This action will remove the listing and its Cloudinary media assets. This cannot be undone.
               </p>
-              <div className="d-flex gap-2">
-                <button
-                  type="button"
-                  className="btn btn-light flex-grow-1 py-2 fw-semibold border"
-                  onClick={() => setShowDeleteModal(false)}
-                  disabled={isDeleting}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-danger flex-grow-1 py-2 fw-semibold"
-                  onClick={handleConfirmDeleteProduct}
-                  disabled={isDeleting}
-                >
-                  {isDeleting ? (
-                    <span className="d-flex align-items-center justify-content-center gap-2">
-                      <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-                      <span>Deleting...</span>
-                    </span>
-                  ) : (
-                    'Yes, Delete It'
-                  )}
-                </button>
-              </div>
+            </div>
+            <div className="d-flex gap-2 justify-content-center">
+              <button
+                type="button"
+                className="btn btn-outline-secondary btn-sm px-3"
+                onClick={() => setShowDeleteModal(false)}
+                disabled={isDeleting}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-danger btn-sm px-3 fw-semibold"
+                onClick={handleConfirmDeleteProduct}
+                disabled={isDeleting}
+              >
+                {isDeleting ? 'Deleting...' : 'Yes, Delete Permanently'}
+              </button>
             </div>
           </div>
         </div>

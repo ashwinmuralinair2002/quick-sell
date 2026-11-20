@@ -2,34 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 import api from '../api/axios';
-import { useCart } from '../context/CartContext';
+import { useAppDispatch } from '../store/hooks';
+import { fetchCart } from '../store/cartSlice';
+import type { CartItem, CartResponse } from '../store/cartSlice';
 import axios from 'axios';
-
-interface CartItem {
-  _id: string;
-  title: string;
-  description: string;
-  price: number;
-  category: string;
-  subcategory: string;
-  images: Array<{ url: string; public_id: string }> | string[];
-  seller?: {
-    _id: string;
-    name: string;
-    email: string;
-  };
-  status: string;
-  isAvailable: boolean;
-}
-
-interface CartResponse {
-  items: CartItem[];
-  itemCount: number;
-  subtotal: number;
-  gstAmount: number;
-  grandTotal: number;
-  message?: string;
-}
 
 interface AddressItem {
   _id: string;
@@ -77,7 +53,7 @@ interface CreatedOrder {
 
 const Checkout: React.FC = () => {
   const navigate = useNavigate();
-  const { refreshCartCount } = useCart();
+  const dispatch = useAppDispatch();
 
   // Data states
   const [cart, setCart] = useState<CartResponse | null>(null);
@@ -192,8 +168,8 @@ const Checkout: React.FC = () => {
         addressId: selectedAddressId
       });
 
-      // Update cart count badge in navbar (backend cleared the cart)
-      await refreshCartCount();
+      // Update cart state in Redux store (backend cleared the cart)
+      await dispatch(fetchCart());
 
       // Display Order Confirmation view
       setPlacedOrder(response.data.order);
