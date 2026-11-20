@@ -5,7 +5,7 @@ import CategorySection from '../components/CategorySection';
 import ProductCard from '../components/ProductCard';
 import type { BackendProduct } from '../components/ProductCard';
 import FilterSection from '../components/FilterSection';
-import { useAuth } from '../context/AuthContext';
+import { useAppSelector } from '../store/hooks';
 import axios from 'axios';
 
 interface ProductsApiResponse {
@@ -16,7 +16,7 @@ interface ProductsApiResponse {
 }
 
 const Home: React.FC = () => {
-  const { user } = useAuth();
+  const user = useAppSelector((state) => state.auth.user);
 
   // Products and Pagination State
   const [products, setProducts] = useState<BackendProduct[]>([]);

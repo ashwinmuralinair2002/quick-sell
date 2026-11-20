@@ -1,19 +1,11 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import api from '../api/axios';
-import { useAuth } from '../context/AuthContext';
-import type { User } from '../context/AuthContext';
-import axios from 'axios';
+import { useAppDispatch, useAppSelector } from '../store/hooks';
+import { login, clearError } from '../store/authSlice';
 
 interface LoginFormErrors {
   email?: string;
   password?: string;
-}
-
-interface LoginResponse {
-  message: string;
-  accessToken: string;
-  user: User;
 }
 
 const Login: React.FC = () => {
@@ -22,10 +14,11 @@ const Login: React.FC = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [errors, setErrors] = useState<LoginFormErrors>({});
   const [serverError, setServerError] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const { login } = useAuth();
+  const dispatch = useAppDispatch();
   const navigate = useNavigate();
+  const { status, error: reduxError } = useAppSelector((state) => state.auth);
+  const isSubmitting = status === 'loading';
 
   const validateForm = (): boolean => {
     const newErrors: LoginFormErrors = {};
@@ -49,34 +42,34 @@ const Login: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setServerError(null);
+    dispatch(clearError());
 
-    if (!validateForm()) {
+    if (!validateForm() || isSubmitting) {
       return;
     }
 
-    setIsSubmitting(true);
-
     try {
-      const response = await api.post<LoginResponse>('/api/auth/login', {
-        email: email.trim(),
-        password
-      });
+      await dispatch(
+        login({
+          email: email.trim(),
+          password
+        })
+      ).unwrap();
 
-      // Update auth context with user and in-memory access token
-      login(response.data.user, response.data.accessToken);
-
-      // Navigate to home page
+      // Navigate to home page on successful authentication
       navigate('/', { replace: true });
     } catch (err: unknown) {
-      if (axios.isAxiosError(err) && err.response?.data?.message) {
-        setServerError(err.response.data.message);
+      if (typeof err === 'string') {
+        setServerError(err);
+      } else if (err instanceof Error) {
+        setServerError(err.message);
       } else {
         setServerError('Unable to sign in. Please check your network and try again.');
       }
-    } finally {
-      setIsSubmitting(false);
     }
   };
+
+  const activeError = serverError || reduxError;
 
   return (
     <div className="auth-wrapper">
@@ -91,9 +84,9 @@ const Login: React.FC = () => {
         </div>
 
         {/* Server Error Alert */}
-        {serverError && (
+        {activeError && (
           <div className="alert alert-danger py-2 px-3 mb-3 text-start" role="alert" style={{ fontSize: '0.875rem' }}>
-            {serverError}
+            {activeError}
           </div>
         )}
 
@@ -115,6 +108,7 @@ const Login: React.FC = () => {
                 setEmail(e.target.value);
                 if (errors.email) setErrors((prev) => ({ ...prev, email: undefined }));
                 if (serverError) setServerError(null);
+                if (reduxError) dispatch(clearError());
               }}
             />
             {errors.email && <div className="field-error">{errors.email}</div>}
@@ -137,6 +131,7 @@ const Login: React.FC = () => {
                   setPassword(e.target.value);
                   if (errors.password) setErrors((prev) => ({ ...prev, password: undefined }));
                   if (serverError) setServerError(null);
+                  if (reduxError) dispatch(clearError());
                 }}
               />
               <button

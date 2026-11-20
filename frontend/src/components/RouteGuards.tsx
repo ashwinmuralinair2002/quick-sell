@@ -1,10 +1,10 @@
 import React from 'react';
 import { Navigate, Outlet } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
+import { useAppSelector } from '../store/hooks';
 
 // ProtectedRoute: Only allows authenticated users, otherwise redirects to /login
 export const ProtectedRoute: React.FC = () => {
-  const { user, isLoading } = useAuth();
+  const { user, isLoading } = useAppSelector((state) => state.auth);
 
   if (isLoading) {
     return (
@@ -25,7 +25,7 @@ export const ProtectedRoute: React.FC = () => {
 
 // PublicOnlyRoute: Only allows unauthenticated users; redirects authenticated users to /
 export const PublicOnlyRoute: React.FC = () => {
-  const { user, isLoading } = useAuth();
+  const { user, isLoading } = useAppSelector((state) => state.auth);
 
   if (isLoading) {
     return (

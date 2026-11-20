@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 import api from '../api/axios';
-import { useAuth } from '../context/AuthContext';
+import { useAppSelector } from '../store/hooks';
 import { useCart } from '../context/CartContext';
 import type { BackendProduct } from '../components/ProductCard';
 import axios from 'axios';
@@ -43,7 +43,7 @@ interface CartApiResponse {
 const ProductDetails: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const user = useAppSelector((state) => state.auth.user);
   const { refreshCartCount } = useCart();
 
   // Product Data and UI States

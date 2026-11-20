@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import api from '../api/axios';
-import axios from 'axios';
+import { useAppDispatch } from '../store/hooks';
+import { register } from '../store/authSlice';
 
 interface RegisterFormErrors {
   name?: string;
@@ -21,6 +21,7 @@ const Register: React.FC = () => {
   const [serverError, setServerError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const dispatch = useAppDispatch();
   const navigate = useNavigate();
 
   const validateForm = (): boolean => {
@@ -65,17 +66,19 @@ const Register: React.FC = () => {
     setIsSubmitting(true);
 
     try {
-      await api.post('/api/auth/register', {
-        name: name.trim(),
-        email: email.trim(),
-        password
-      });
+      await dispatch(
+        register({
+          name: name.trim(),
+          email: email.trim(),
+          password
+        })
+      ).unwrap();
 
       // Backend registration succeeds with 201; redirect user to login
       navigate('/login', { replace: true });
     } catch (err: unknown) {
-      if (axios.isAxiosError(err) && err.response?.data?.message) {
-        setServerError(err.response.data.message);
+      if (typeof err === 'string') {
+        setServerError(err);
       } else {
         setServerError('Registration failed. Please check your connection and try again.');
       }

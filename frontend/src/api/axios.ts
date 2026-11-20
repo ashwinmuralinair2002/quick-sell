@@ -17,6 +17,18 @@ export const getAccessToken = (): string | null => {
   return memoryAccessToken;
 };
 
+// Token sync handlers allowing Redux store to observe refreshed tokens and auth expiry without circular imports
+type TokenSyncHandlers = {
+  onTokenRefreshed?: (token: string) => void;
+  onAuthExpired?: () => void;
+};
+
+let syncHandlers: TokenSyncHandlers = {};
+
+export const setTokenSyncHandler = (handlers: TokenSyncHandlers): void => {
+  syncHandlers = handlers;
+};
+
 // Request interceptor: attach memoryAccessToken to Authorization header
 api.interceptors.request.use(
   (config) => {
@@ -85,12 +97,19 @@ api.interceptors.response.use(
         const newAccessToken = response.data.accessToken;
         setAccessToken(newAccessToken);
 
+        // Notify Redux store of token refresh
+        syncHandlers.onTokenRefreshed?.(newAccessToken);
+
         originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
         processQueue(null, newAccessToken);
         return api(originalRequest);
       } catch (refreshError) {
         processQueue(refreshError, null);
         setAccessToken(null);
+
+        // Notify Redux store of session invalidation
+        syncHandlers.onAuthExpired?.();
+
         return Promise.reject(refreshError);
       } finally {
         isRefreshing = false;

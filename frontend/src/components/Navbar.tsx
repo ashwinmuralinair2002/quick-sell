@@ -1,16 +1,23 @@
 import React from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
+import { useAppDispatch, useAppSelector } from '../store/hooks';
+import { logout } from '../store/authSlice';
 import { useCart } from '../context/CartContext';
 
 const Navbar: React.FC = () => {
-  const { user, logout } = useAuth();
+  const dispatch = useAppDispatch();
+  const user = useAppSelector((state) => state.auth.user);
   const { cartItemCount } = useCart();
   const navigate = useNavigate();
 
   const handleLogout = async () => {
-    await logout();
-    navigate('/login');
+    try {
+      await dispatch(logout()).unwrap();
+    } catch {
+      // Proceed even on rejection
+    } finally {
+      navigate('/login');
+    }
   };
 
   return (

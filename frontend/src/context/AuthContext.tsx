@@ -1,11 +1,9 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import api, { setAccessToken } from '../api/axios';
+import React, { createContext, useContext } from 'react';
+import { useAppSelector, useAppDispatch } from '../store/hooks';
+import { logout as logoutThunk, updateUser as updateUserAction } from '../store/authSlice';
+import type { User } from '../store/authSlice';
 
-export interface User {
-  id: string;
-  name: string;
-  email: string;
-}
+export type { User };
 
 interface AuthContextType {
   user: User | null;
@@ -18,69 +16,31 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+/**
+ * Compatibility AuthProvider bridging Redux Toolkit authSlice state to legacy useAuth consumers.
+ * Redux Toolkit remains the single source of truth for all authentication state.
+ */
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null);
-  const [accessTokenState, setAccessTokenState] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const dispatch = useAppDispatch();
+  const { user, accessToken, isLoading } = useAppSelector((state) => state.auth);
 
-  // Synchronize state with Axios in-memory token
-  const updateAuth = (newUser: User | null, token: string | null) => {
-    setUser(newUser);
-    setAccessTokenState(token);
-    setAccessToken(token);
-  };
-
-  const login = (userData: User, token: string) => {
-    updateAuth(userData, token);
+  const login = (_userData: User, _token: string) => {
+    // Redux handles login directly via createAsyncThunk, but we support the callback signature if invoked
   };
 
   const updateUser = (updatedFields: Partial<User>) => {
-    setUser((prev) => (prev ? { ...prev, ...updatedFields } : null));
+    dispatch(updateUserAction(updatedFields));
   };
 
   const logout = async () => {
-    try {
-      await api.post('/api/auth/logout');
-    } catch (error) {
-      console.error('Logout error:', error);
-    } finally {
-      updateAuth(null, null);
-    }
+    await dispatch(logoutThunk()).unwrap();
   };
-
-  // Restore session on initial application load using the refresh token cookie
-  useEffect(() => {
-    const restoreSession = async () => {
-      try {
-        const refreshResponse = await api.post<{ accessToken: string }>('/api/auth/refresh');
-        const token = refreshResponse.data.accessToken;
-        setAccessToken(token);
-        setAccessTokenState(token);
-
-        // Fetch user profile using the refreshed access token
-        const profileResponse = await api.get<{ user: User }>('/api/users/profile', {
-          headers: {
-            Authorization: `Bearer ${token}`
-          }
-        });
-
-        setUser(profileResponse.data.user);
-      } catch (error) {
-        // No valid session / refresh token, clear memory
-        updateAuth(null, null);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    restoreSession();
-  }, []);
 
   return (
     <AuthContext.Provider
       value={{
         user,
-        accessToken: accessTokenState,
+        accessToken,
         isLoading,
         login,
         logout,

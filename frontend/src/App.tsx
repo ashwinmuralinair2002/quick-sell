@@ -1,4 +1,7 @@
+import { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { useAppDispatch } from './store/hooks';
+import { restoreSession } from './store/authSlice';
 import { AuthProvider } from './context/AuthContext';
 import { CartProvider } from './context/CartContext';
 import { ProtectedRoute, PublicOnlyRoute } from './components/RouteGuards';
@@ -13,6 +16,13 @@ import MyListings from './pages/MyListings';
 import Account from './pages/Account';
 
 function App() {
+  const dispatch = useAppDispatch();
+
+  useEffect(() => {
+    // Restore session on initial application load using refresh-token cookie
+    dispatch(restoreSession());
+  }, [dispatch]);
+
   return (
     <AuthProvider>
       <CartProvider>

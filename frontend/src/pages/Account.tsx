@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 import api from '../api/axios';
-import { useAuth } from '../context/AuthContext';
+import { useAppDispatch, useAppSelector } from '../store/hooks';
+import { updateUser as updateAuthUser } from '../store/authSlice';
 import axios from 'axios';
 
 interface AddressItem {
@@ -73,7 +74,8 @@ const emptyAddressForm: AddressFormData = {
 };
 
 const Account: React.FC = () => {
-  const { user, updateUser } = useAuth();
+  const dispatch = useAppDispatch();
+  const user = useAppSelector((state) => state.auth.user);
 
   // 1. Personal Information State
   const [profileName, setProfileName] = useState<string>('');
@@ -230,7 +232,7 @@ const Account: React.FC = () => {
       setSavedName(updatedName);
       setIsEditingName(false);
       setProfileSuccess(response.data.message || 'Profile updated successfully!');
-      updateUser({ name: updatedName });
+      dispatch(updateAuthUser({ name: updatedName }));
 
       setTimeout(() => setProfileSuccess(null), 3000);
     } catch (err: unknown) {
