@@ -13,15 +13,41 @@ const Home: React.FC = () => {
   const { products, currentPage, totalPages, totalProducts, isLoading, error: errorMessage } =
     useAppSelector((state) => state.products);
 
-  // Search and Filter States (Local UI State)
+  // Immediate input states (separate from debounced query values for instant typing feedback)
   const [searchInput, setSearchInput] = useState<string>('');
-  const [activeSearch, setActiveSearch] = useState<string>('');
+  const [minPriceInput, setMinPriceInput] = useState<string>('');
+  const [maxPriceInput, setMaxPriceInput] = useState<string>('');
+
+  // Debounced filter states used for triggering API queries
+  const [debouncedSearch, setDebouncedSearch] = useState<string>('');
+  const [debouncedMinPrice, setDebouncedMinPrice] = useState<string>('');
+  const [debouncedMaxPrice, setDebouncedMaxPrice] = useState<string>('');
+
+  // Applied filters (used for querying and badge display)
   const [category, setCategory] = useState<string>('');
   const [minPrice, setMinPrice] = useState<string>('');
   const [maxPrice, setMaxPrice] = useState<string>('');
   const [sort, setSort] = useState<string>('newest');
 
-  // Dispatch fetchProducts thunk
+  // Filter Modal visibility and draft states
+  const [showFilterModal, setShowFilterModal] = useState<boolean>(false);
+  const [draftCategory, setDraftCategory] = useState<string>('');
+  const [draftMinPrice, setDraftMinPrice] = useState<string>('');
+  const [draftMaxPrice, setDraftMaxPrice] = useState<string>('');
+  const [draftSort, setDraftSort] = useState<string>('newest');
+
+  // 400ms Debounce effect for search input
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchInput);
+    }, 400);
+
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [searchInput]);
+
+  // Dispatch fetchProducts thunk with cancellation of stale in-flight requests
   const loadProducts = useCallback(
     (page: number = 1) => {
       const params: FetchProductsParams = {
@@ -33,8 +59,8 @@ const Home: React.FC = () => {
         params.category = category.trim();
       }
 
-      if (activeSearch.trim()) {
-        params.search = activeSearch.trim();
+      if (debouncedSearch.trim()) {
+        params.search = debouncedSearch.trim();
       }
 
       if (minPrice.trim() !== '') {
@@ -55,30 +81,66 @@ const Home: React.FC = () => {
         params.sort = sort.trim();
       }
 
-      dispatch(fetchProducts(params));
+      const promise = dispatch(fetchProducts(params));
+      return () => {
+        promise.abort();
+      };
     },
-    [dispatch, category, activeSearch, minPrice, maxPrice, sort]
+    [dispatch, category, debouncedSearch, minPrice, maxPrice, sort]
   );
 
-  // Re-fetch when filters change (resets to page 1)
+  // Re-fetch when debounced search/price, category, or sort changes (resets to page 1)
   useEffect(() => {
-    loadProducts(1);
+    const cancel = loadProducts(1);
+    return () => {
+      if (cancel) cancel();
+    };
   }, [loadProducts]);
 
-  // Handle Search Submission
+  // Handle immediate Search Form Submission (bypasses remaining 400ms delay on Enter/Submit)
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    setActiveSearch(searchInput);
+    setDebouncedSearch(searchInput);
   };
 
-  // Reset all filters
+  // Open filter modal and synchronize draft states from currently applied filters
+  const handleOpenFilterModal = () => {
+    setDraftCategory(category);
+    setDraftMinPrice(minPrice);
+    setDraftMaxPrice(maxPrice);
+    setDraftSort(sort);
+    setShowFilterModal(true);
+  };
+
+  // Apply filters from modal
+  const handleApplyModalFilters = () => {
+    setCategory(draftCategory);
+    setMinPrice(draftMinPrice);
+    setMaxPrice(draftMaxPrice);
+    setSort(draftSort);
+    setShowFilterModal(false);
+  };
+
+  // Reset modal draft filters
+  const handleResetModalFilters = () => {
+    setDraftCategory('');
+    setDraftMinPrice('');
+    setDraftMaxPrice('');
+    setDraftSort('newest');
+  };
+
+  // Reset all active filters (and search if requested)
   const handleResetFilters = () => {
     setCategory('');
     setMinPrice('');
     setMaxPrice('');
     setSort('newest');
     setSearchInput('');
-    setActiveSearch('');
+    setDebouncedSearch('');
+    setDraftCategory('');
+    setDraftMinPrice('');
+    setDraftMaxPrice('');
+    setDraftSort('newest');
   };
 
   // Pagination Change
@@ -124,7 +186,7 @@ const Home: React.FC = () => {
                     className="btn btn-link text-muted border-0 pe-3 text-decoration-none"
                     onClick={() => {
                       setSearchInput('');
-                      setActiveSearch('');
+                      setDebouncedSearch('');
                     }}
                     title="Clear search"
                   >
@@ -145,26 +207,15 @@ const Home: React.FC = () => {
           onSelectCategory={(cat) => setCategory(cat)}
         />
 
-        {/* Filter Section: Category, Price Range, Sorting */}
-        <FilterSection
-          category={category}
-          minPrice={minPrice}
-          maxPrice={maxPrice}
-          sort={sort}
-          onCategoryChange={setCategory}
-          onMinPriceChange={setMinPrice}
-          onMaxPriceChange={setMaxPrice}
-          onSortChange={setSort}
-          onReset={handleResetFilters}
-        />
+
 
         {/* Active Filters Summary */}
-        {(category || activeSearch || minPrice || maxPrice || sort !== 'newest') && (
+        {(category || debouncedSearch || minPrice || maxPrice || sort !== 'newest') && (
           <div className="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3 px-1">
             <div className="d-flex align-items-center gap-2 flex-wrap small text-muted">
               <span>Filtering by:</span>
               {category && <span className="badge bg-light text-dark border">Category: {category}</span>}
-              {activeSearch && <span className="badge bg-light text-dark border">Search: "{activeSearch}"</span>}
+              {debouncedSearch && <span className="badge bg-light text-dark border">Search: "{debouncedSearch}"</span>}
               {minPrice && <span className="badge bg-light text-dark border">Min: ₹{minPrice}</span>}
               {maxPrice && <span className="badge bg-light text-dark border">Max: ₹{maxPrice}</span>}
               {sort !== 'newest' && <span className="badge bg-light text-dark border">Sort: {sort}</span>}
@@ -179,14 +230,30 @@ const Home: React.FC = () => {
           </div>
         )}
 
-        {/* Section Heading with Results Count */}
-        <div className="d-flex align-items-center justify-content-between mb-3 px-1">
+        {/* Section Heading with Results Count & Filter Button */}
+        <div className="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3 px-1">
           <h2 className="section-title mb-0">Explore Available Listings</h2>
-          {!isLoading && !errorMessage && (
-            <span className="text-muted small">
-              {totalProducts} {totalProducts === 1 ? 'device' : 'devices'} found
-            </span>
-          )}
+          <div className="d-flex align-items-center gap-3">
+            {!isLoading && !errorMessage && (
+              <span className="text-muted small">
+                {totalProducts} {totalProducts === 1 ? 'device' : 'devices'} found
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={handleOpenFilterModal}
+              className="btn btn-outline-secondary btn-sm d-inline-flex align-items-center gap-2 px-3 py-1 rounded-3 shadow-sm"
+              aria-label="Filter and Sort"
+            >
+              <span>⚙️</span>
+              <span className="fw-semibold">Filters</span>
+              {(((Boolean(category) ? 1 : 0) + (Boolean(minPrice) ? 1 : 0) + (Boolean(maxPrice) ? 1 : 0) + (sort !== "newest" ? 1 : 0))) > 0 && (
+                <span className="badge bg-primary rounded-pill px-2 py-0" style={{ fontSize: '0.7rem' }}>
+                  {(((Boolean(category) ? 1 : 0) + (Boolean(minPrice) ? 1 : 0) + (Boolean(maxPrice) ? 1 : 0) + (sort !== "newest" ? 1 : 0)))}
+                </span>
+              )}
+            </button>
+          </div>
         </div>
 
         {/* Loading Spinner */}
@@ -295,6 +362,128 @@ const Home: React.FC = () => {
             </ul>
           </nav>
         )}
+
+      {/* Filter and Sorting Modal */}
+      {showFilterModal && (
+        <div
+          className="modal fade show d-block"
+          tabIndex={-1}
+          role="dialog"
+          style={{ backgroundColor: 'rgba(0, 0, 0, 0.55)', backdropFilter: 'blur(3px)', zIndex: 1050 }}
+        >
+          <div className="modal-dialog modal-dialog-centered" style={{ maxWidth: '520px' }}>
+            <div className="modal-content border-0 shadow-lg rounded-4 p-4">
+              <div className="d-flex justify-content-between align-items-center mb-3 pb-2 border-bottom">
+                <div className="d-flex align-items-center gap-2">
+                  <span style={{ fontSize: '1.25rem' }}>⚙️</span>
+                  <h5 className="fw-bold text-slate-800 mb-0">Filter & Sort Products</h5>
+                </div>
+                <button
+                  type="button"
+                  className="btn-close"
+                  onClick={() => setShowFilterModal(false)}
+                  aria-label="Close"
+                ></button>
+              </div>
+
+              <div>
+                {/* Category Selection */}
+                <div className="mb-3">
+                  <label className="form-label small fw-semibold mb-1">Category</label>
+                  <select
+                    className="form-select form-select-sm"
+                    value={draftCategory}
+                    onChange={(e) => setDraftCategory(e.target.value)}
+                  >
+                    <option value="">All Categories</option>
+                    <option value="Mobiles">Mobiles</option>
+                    <option value="Wearables">Wearables</option>
+                    <option value="Audio">Audio</option>
+                    <option value="Computers">Computers</option>
+                    <option value="Accessories">Accessories</option>
+                    <option value="Cameras">Cameras</option>
+                  </select>
+                </div>
+
+                {/* Price Range */}
+                <div className="row g-2 mb-3">
+                  <div className="col-6">
+                    <label className="form-label small fw-semibold mb-1">Min Price (₹)</label>
+                    <div className="input-group input-group-sm">
+                      <span className="input-group-text bg-light text-muted">₹</span>
+                      <input
+                        type="number"
+                        className="form-control form-control-sm"
+                        placeholder="0"
+                        min="0"
+                        value={draftMinPrice}
+                        onChange={(e) => setDraftMinPrice(e.target.value)}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="col-6">
+                    <label className="form-label small fw-semibold mb-1">Max Price (₹)</label>
+                    <div className="input-group input-group-sm">
+                      <span className="input-group-text bg-light text-muted">₹</span>
+                      <input
+                        type="number"
+                        className="form-control form-control-sm"
+                        placeholder="Any"
+                        min="0"
+                        value={draftMaxPrice}
+                        onChange={(e) => setDraftMaxPrice(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Sort Option */}
+                <div className="mb-4">
+                  <label className="form-label small fw-semibold mb-1">Sort By</label>
+                  <select
+                    className="form-select form-select-sm"
+                    value={draftSort}
+                    onChange={(e) => setDraftSort(e.target.value)}
+                  >
+                    <option value="newest">Newest First</option>
+                    <option value="oldest">Oldest First</option>
+                    <option value="price_asc">Price: Low to High</option>
+                    <option value="price_desc">Price: High to Low</option>
+                  </select>
+                </div>
+
+                {/* Modal Footer Controls */}
+                <div className="d-flex align-items-center justify-content-between pt-2 border-top gap-2">
+                  <button
+                    type="button"
+                    onClick={handleResetModalFilters}
+                    className="btn btn-outline-secondary btn-sm px-3 fw-semibold"
+                  >
+                    Reset All
+                  </button>
+                  <div className="d-flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowFilterModal(false)}
+                      className="btn btn-outline-secondary btn-sm px-3"
+                    >
+                      Close
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleApplyModalFilters}
+                      className="btn btn-primary btn-sm px-4 fw-semibold"
+                    >
+                      Apply Filters
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       </main>
     </div>
   );

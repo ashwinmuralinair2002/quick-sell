@@ -31,21 +31,11 @@ const MyListings: React.FC = () => {
         </div>
 
         {/* Page Header */}
-        <div className="d-flex flex-column flex-sm-row align-items-sm-center justify-content-between mb-4 gap-2">
-          <div>
-            <h2 className="fw-bold text-slate-800 mb-1">My Listings</h2>
-            <p className="text-muted small mb-0">
-              Manage the products and tech gadgets you have posted for sale.
-            </p>
-          </div>
-
-          <Link
-            to="/add-product"
-            className="btn btn-primary px-3 py-2 fw-semibold d-inline-flex align-items-center gap-1 align-self-start align-self-sm-auto"
-          >
-            <span>+</span>
-            <span>Sell Another Product</span>
-          </Link>
+        <div className="mb-4">
+          <h2 className="fw-bold text-slate-800 mb-1">My Listings</h2>
+          <p className="text-muted small mb-0">
+            Manage the products and tech gadgets you have posted for sale.
+          </p>
         </div>
 
         {/* Stats summary banner */}
@@ -116,8 +106,21 @@ const MyListings: React.FC = () => {
         {!isLoading && !errorMessage && products.length > 0 && (
           <div className="row g-3 g-md-4 mb-4">
             {products.map((product) => (
-              <div key={product._id} className="col-6 col-md-4 col-lg-3">
+              <div key={product._id} className="col-6 col-md-4 col-lg-3 position-relative">
                 <ProductCard product={product} isOwner={true} />
+                {product.status === 'sold' && (
+                  <span
+                    className="badge bg-danger position-absolute top-0 end-0 m-3 px-2 py-1 shadow-sm fw-bold"
+                    style={{
+                      fontSize: '0.8rem',
+                      letterSpacing: '0.05em',
+                      zIndex: 2,
+                      pointerEvents: 'none'
+                    }}
+                  >
+                    SOLD
+                  </span>
+                )}
               </div>
             ))}
           </div>

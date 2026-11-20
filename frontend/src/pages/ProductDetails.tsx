@@ -533,131 +533,134 @@ const ProductDetails: React.FC = () => {
               </div>
             </div>
 
-            {/* Right Column: Product Metadata, Pricing, Actions & Seller Info */}
+            {/* Right Column: Product Information Card, Device Description & Seller Info */}
             <div className="col-12 col-lg-5">
-              <div className="d-flex flex-column h-100">
-                {/* Category & Subcategory Tags */}
-                <div className="mb-2">
-                  <span className="badge bg-light text-dark border px-2 py-1 small me-2">
-                    {product.category}
-                  </span>
-                  <span className="badge bg-light text-secondary border px-2 py-1 small">
-                    {product.subcategory}
-                  </span>
-                </div>
+              <div className="d-flex flex-column">
+                {/* 1. Product Information Card */}
+                <div className="card border-0 shadow-sm rounded-4 p-4 bg-white mb-3">
+                  {/* Category & Subcategory Tags */}
+                  <div className="mb-2">
+                    <span className="badge bg-light text-dark border px-2 py-1 small me-2">
+                      {product.category}
+                    </span>
+                    <span className="badge bg-light text-secondary border px-2 py-1 small">
+                      {product.subcategory}
+                    </span>
+                  </div>
 
-                {/* Product Title */}
-                <h1 className="fw-bold text-slate-800 mb-2 h3">
-                  {product.title}
-                </h1>
+                  {/* Product Title */}
+                  <h1 className="fw-bold text-slate-800 mb-2 h3">
+                    {product.title}
+                  </h1>
 
-                {/* Price Display */}
-                <div className="price-tag mb-3 fs-2 fw-bold text-primary">
-                  ₹{new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 }).format(product.price)}
-                </div>
+                  {/* Price Display */}
+                  <div className="price-tag mb-3 fs-2 fw-bold text-primary">
+                    ₹{new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 }).format(product.price)}
+                  </div>
 
-                {/* Owner Manage Bar (Edit, Mark as Sold, Delete) */}
-                {isOwner && (
-                  <div className="owner-action-panel p-3 rounded-3 mb-4 bg-warning bg-opacity-10 border border-warning">
-                    <div className="small fw-semibold text-dark mb-2 d-flex align-items-center gap-1">
-                      <span>⚙️</span> Manage Your Listing:
+                  {/* Owner Manage Bar (Edit, Mark as Sold, Delete) */}
+                  {isOwner && (
+                    <div className="owner-action-panel p-3 rounded-3 bg-warning bg-opacity-10 border border-warning">
+                      <div className="small fw-semibold text-dark mb-2 d-flex align-items-center gap-1">
+                        <span>⚙️</span> Manage Your Listing:
+                      </div>
+                      <div className="d-flex flex-wrap gap-2">
+                        {/* Edit Button */}
+                        {!isSold && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsEditing(true);
+                              setUpdateError(null);
+                              setUpdateSuccess(null);
+                              setImageError(null);
+                              if (product) {
+                                resetEditForm({
+                                  title: product.title,
+                                  description: product.description,
+                                  price: String(product.price),
+                                  category: (product.category as CategoryName) || '',
+                                  subcategory: product.subcategory || ''
+                                });
+                                const urls: string[] = Array.isArray(product.images)
+                                  ? product.images
+                                      .map((img) => (typeof img === 'string' ? img : img && typeof img.url === 'string' ? img.url : ''))
+                                      .filter(Boolean)
+                                  : [];
+                                setExistingImages(urls);
+                                setNewImages([]);
+                              }
+                            }}
+                            className="btn btn-sm btn-outline-dark fw-semibold"
+                          >
+                            ✏️ Edit Listing
+                          </button>
+                        )}
+
+                        {/* Mark as Sold Button */}
+                        {!isSold && (
+                          <button
+                            type="button"
+                            onClick={() => setShowMarkSoldModal(true)}
+                            className="btn btn-sm btn-outline-success fw-semibold"
+                            disabled={isMarkingSold}
+                          >
+                            🏷️ Mark as Sold
+                          </button>
+                        )}
+
+                        {/* Delete Listing Button */}
+                        <button
+                          type="button"
+                          onClick={() => setShowDeleteModal(true)}
+                          className="btn btn-sm btn-outline-danger fw-semibold"
+                          disabled={isDeleting}
+                        >
+                          🗑️ Delete
+                        </button>
+                      </div>
                     </div>
-                    <div className="d-flex flex-wrap gap-2">
-                      {/* Edit Button */}
-                      {!isSold && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setIsEditing(true);
-                            setUpdateError(null);
-                            setUpdateSuccess(null);
-                            setImageError(null);
-                            if (product) {
-                              resetEditForm({
-                                title: product.title,
-                                description: product.description,
-                                price: String(product.price),
-                                category: (product.category as CategoryName) || '',
-                                subcategory: product.subcategory || ''
-                              });
-                              const urls: string[] = Array.isArray(product.images)
-                                ? product.images
-                                    .map((img) => (typeof img === 'string' ? img : img && typeof img.url === 'string' ? img.url : ''))
-                                    .filter(Boolean)
-                                : [];
-                              setExistingImages(urls);
-                              setNewImages([]);
-                            }
-                          }}
-                          className="btn btn-sm btn-outline-dark fw-semibold"
-                        >
-                          ✏️ Edit Listing
-                        </button>
-                      )}
+                  )}
 
-                      {/* Mark as Sold Button */}
-                      {!isSold && (
-                        <button
-                          type="button"
-                          onClick={() => setShowMarkSoldModal(true)}
-                          className="btn btn-sm btn-outline-success fw-semibold"
-                          disabled={isMarkingSold}
-                        >
-                          🏷️ Mark as Sold
-                        </button>
-                      )}
-
-                      {/* Delete Listing Button */}
+                  {/* Primary Buyer Action: Add / Remove Cart (Rendered inside Product Info card) */}
+                  {!isOwner && (
+                    <div className="d-grid mt-2">
                       <button
                         type="button"
-                        onClick={() => setShowDeleteModal(true)}
-                        className="btn btn-sm btn-outline-danger fw-semibold"
-                        disabled={isDeleting}
+                        onClick={handleCartAction}
+                        disabled={isCartActionLoading || (isSold && !isInCart)}
+                        className={`btn py-2 fw-semibold d-flex align-items-center justify-content-center gap-2 ${isInCart
+                            ? 'btn-danger'
+                            : isSold
+                              ? 'btn-secondary disabled'
+                              : 'btn-primary-custom'
+                          }`}
                       >
-                        🗑️ Delete
+                        {isCartActionLoading ? (
+                          <>
+                            <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                            <span>Updating Cart...</span>
+                          </>
+                        ) : isInCart ? (
+                          <>
+                            <span>🛒</span>
+                            <span>Remove from Cart</span>
+                          </>
+                        ) : isSold ? (
+                          <span>Sold Out</span>
+                        ) : (
+                          <>
+                            <span>🛒</span>
+                            <span>Add to Cart</span>
+                          </>
+                        )}
                       </button>
                     </div>
-                  </div>
-                )}
+                  )}
+                </div>
 
-                {/* Primary Buyer Action: Add / Remove Cart */}
-                {!isOwner && (
-                  <div className="d-grid mb-4">
-                    <button
-                      type="button"
-                      onClick={handleCartAction}
-                      disabled={isCartActionLoading || (isSold && !isInCart)}
-                      className={`btn py-2 fw-semibold d-flex align-items-center justify-content-center gap-2 ${isInCart
-                          ? 'btn-danger'
-                          : isSold
-                            ? 'btn-secondary disabled'
-                            : 'btn-primary-custom'
-                        }`}
-                    >
-                      {isCartActionLoading ? (
-                        <>
-                          <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-                          <span>Updating Cart...</span>
-                        </>
-                      ) : isInCart ? (
-                        <>
-                          <span>🛒</span>
-                          <span>Remove from Cart</span>
-                        </>
-                      ) : isSold ? (
-                        <span>Sold Out</span>
-                      ) : (
-                        <>
-                          <span>🛒</span>
-                          <span>Add to Cart</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                )}
-
-                {/* Hardware Description Section */}
-                <div className="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
+                {/* 2. Device Description Section */}
+                <div className="card border-0 shadow-sm rounded-4 p-4 bg-white mb-3">
                   <h5 className="fw-bold text-slate-800 mb-2">Device Description</h5>
                   <p
                     className="text-muted small mb-0"
@@ -667,32 +670,39 @@ const ProductDetails: React.FC = () => {
                   </p>
                 </div>
 
-                {/* Verified Seller Information Card */}
-                <div className="card border-0 shadow-sm rounded-4 p-3 bg-white mt-auto">
-                  <h6 className="fw-bold text-slate-800 mb-2 d-flex align-items-center gap-1">
-                    <span>🛡️</span> Seller Information
-                  </h6>
-                  <div className="d-flex align-items-center gap-2">
-                    <div
-                      className="rounded-circle bg-primary bg-opacity-10 text-primary d-flex align-items-center justify-content-center fw-bold"
-                      style={{ width: '40px', height: '40px' }}
-                    >
-                      {product.seller && typeof product.seller === 'object' && product.seller.name
-                        ? product.seller.name.charAt(0).toUpperCase()
-                        : 'S'}
-                    </div>
-                    <div>
-                      <div className="fw-semibold text-slate-800 small">
+                {/* Verified Seller Information Card (Only displayed when viewer is not the listing owner) */}
+                {!isOwner && (
+                  <div className="card border-0 shadow-sm rounded-4 p-3 bg-white">
+                    <h6 className="fw-bold text-slate-800 mb-2 d-flex align-items-center gap-1">
+                      <span>🛡️</span> Seller Information
+                    </h6>
+                    <div className="d-flex align-items-center gap-2">
+                      <div
+                        className="rounded-circle bg-primary bg-opacity-10 text-primary d-flex align-items-center justify-content-center fw-bold"
+                        style={{ width: '40px', height: '40px' }}
+                      >
                         {product.seller && typeof product.seller === 'object' && product.seller.name
-                          ? product.seller.name
-                          : 'Verified Tech Enthusiast'}
+                          ? product.seller.name.charAt(0).toUpperCase()
+                          : 'S'}
                       </div>
-                      <div className="text-muted small" style={{ fontSize: '0.75rem' }}>
-                        Member of QuickSell Marketplace
+                      <div>
+                        <div className="fw-semibold text-slate-800 small">
+                          {product.seller && typeof product.seller === 'object' && product.seller.name
+                            ? product.seller.name
+                            : 'Verified Tech Enthusiast'}
+                        </div>
+                        {product.seller && typeof product.seller === 'object' && product.seller.email && (
+                          <div className="text-muted small d-flex align-items-center gap-1" style={{ fontSize: '0.75rem' }}>
+                            <span>✉️</span> {product.seller.email}
+                          </div>
+                        )}
+                        <div className="text-muted small" style={{ fontSize: '0.75rem' }}>
+                          Member of QuickSell Marketplace
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
+                )}
               </div>
             </div>
           </div>
