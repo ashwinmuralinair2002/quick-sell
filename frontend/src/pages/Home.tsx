@@ -1,34 +1,19 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import api from '../api/axios';
 import Navbar from '../components/Navbar';
 import CategorySection from '../components/CategorySection';
 import ProductCard from '../components/ProductCard';
-import type { BackendProduct } from '../components/ProductCard';
 import FilterSection from '../components/FilterSection';
-import { useAppSelector } from '../store/hooks';
-import axios from 'axios';
-
-interface ProductsApiResponse {
-  products: BackendProduct[];
-  currentPage: number;
-  totalPages: number;
-  totalProducts: number;
-}
+import { useAppDispatch, useAppSelector } from '../store/hooks';
+import { fetchProducts } from '../store/productSlice';
+import type { FetchProductsParams } from '../store/productSlice';
 
 const Home: React.FC = () => {
+  const dispatch = useAppDispatch();
   const user = useAppSelector((state) => state.auth.user);
+  const { products, currentPage, totalPages, totalProducts, isLoading, error: errorMessage } =
+    useAppSelector((state) => state.products);
 
-  // Products and Pagination State
-  const [products, setProducts] = useState<BackendProduct[]>([]);
-  const [currentPage, setCurrentPage] = useState<number>(1);
-  const [totalPages, setTotalPages] = useState<number>(1);
-  const [totalProducts, setTotalProducts] = useState<number>(0);
-
-  // Loading and Error States
-  const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
-  // Search and Filter States
+  // Search and Filter States (Local UI State)
   const [searchInput, setSearchInput] = useState<string>('');
   const [activeSearch, setActiveSearch] = useState<string>('');
   const [category, setCategory] = useState<string>('');
@@ -36,13 +21,10 @@ const Home: React.FC = () => {
   const [maxPrice, setMaxPrice] = useState<string>('');
   const [sort, setSort] = useState<string>('newest');
 
-  // Fetch products from backend GET /api/products
-  const fetchProducts = useCallback(async (page: number = 1) => {
-    setIsLoading(true);
-    setErrorMessage(null);
-
-    try {
-      const params: Record<string, string | number> = {
+  // Dispatch fetchProducts thunk
+  const loadProducts = useCallback(
+    (page: number = 1) => {
+      const params: FetchProductsParams = {
         page,
         limit: 12
       };
@@ -73,28 +55,15 @@ const Home: React.FC = () => {
         params.sort = sort.trim();
       }
 
-      const response = await api.get<ProductsApiResponse>('/api/products', { params });
-
-      setProducts(response.data.products || []);
-      setCurrentPage(response.data.currentPage || 1);
-      setTotalPages(response.data.totalPages || 1);
-      setTotalProducts(response.data.totalProducts || 0);
-    } catch (err: unknown) {
-      if (axios.isAxiosError(err) && err.response?.data?.message) {
-        setErrorMessage(err.response.data.message);
-      } else {
-        setErrorMessage('Failed to load marketplace products. Please check your connection.');
-      }
-      setProducts([]);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [category, activeSearch, minPrice, maxPrice, sort]);
+      dispatch(fetchProducts(params));
+    },
+    [dispatch, category, activeSearch, minPrice, maxPrice, sort]
+  );
 
   // Re-fetch when filters change (resets to page 1)
   useEffect(() => {
-    fetchProducts(1);
-  }, [fetchProducts]);
+    loadProducts(1);
+  }, [loadProducts]);
 
   // Handle Search Submission
   const handleSearchSubmit = (e: React.FormEvent) => {
@@ -115,7 +84,7 @@ const Home: React.FC = () => {
   // Pagination Change
   const handlePageChange = (newPage: number) => {
     if (newPage >= 1 && newPage <= totalPages && newPage !== currentPage) {
-      fetchProducts(newPage);
+      loadProducts(newPage);
       window.scrollTo({ top: 350, behavior: 'smooth' });
     }
   };
@@ -138,43 +107,45 @@ const Home: React.FC = () => {
             {/* Prominent Search Bar */}
             <form onSubmit={handleSearchSubmit} className="search-form d-flex gap-2">
               <div className="input-group search-input-group shadow-sm">
-                <span className="input-group-text bg-white border-end-0 text-muted">
-                  🔍
+                <span className="input-group-text bg-white border-end-0 ps-3">
+                  <span className="text-muted">🔍</span>
                 </span>
                 <input
                   type="text"
-                  className="form-control border-start-0 ps-0"
-                  placeholder="Search by brand, model or device (e.g. iPhone 14, MacBook M2, Sony XM5)..."
+                  className="form-control border-start-0 py-2 ps-2"
+                  placeholder="Search smartphones, laptops, audio devices..."
                   value={searchInput}
                   onChange={(e) => setSearchInput(e.target.value)}
+                  aria-label="Search products"
                 />
                 {searchInput && (
                   <button
                     type="button"
-                    className="btn btn-link text-muted border-0 text-decoration-none pe-3"
+                    className="btn btn-link text-muted border-0 pe-3 text-decoration-none"
                     onClick={() => {
                       setSearchInput('');
                       setActiveSearch('');
                     }}
+                    title="Clear search"
                   >
                     ✕
                   </button>
                 )}
               </div>
-              <button type="submit" className="btn btn-search px-4 fw-semibold text-white">
+              <button type="submit" className="btn btn-primary px-4 fw-semibold shadow-sm">
                 Search
               </button>
             </form>
           </div>
         </section>
 
-        {/* Product Categories */}
+        {/* Category Navigation Bar */}
         <CategorySection
           selectedCategory={category}
-          onSelectCategory={(selected) => setCategory(selected)}
+          onSelectCategory={(cat) => setCategory(cat)}
         />
 
-        {/* Filter and Sorting UI */}
+        {/* Filter Section: Category, Price Range, Sorting */}
         <FilterSection
           category={category}
           minPrice={minPrice}
@@ -187,124 +158,144 @@ const Home: React.FC = () => {
           onReset={handleResetFilters}
         />
 
-        {/* Product Listings Header */}
-        <div className="d-flex align-items-center justify-content-between mb-3">
-          <h5 className="fw-bold mb-0 text-slate-800">
-            Available Listings
-          </h5>
+        {/* Active Filters Summary */}
+        {(category || activeSearch || minPrice || maxPrice || sort !== 'newest') && (
+          <div className="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3 px-1">
+            <div className="d-flex align-items-center gap-2 flex-wrap small text-muted">
+              <span>Filtering by:</span>
+              {category && <span className="badge bg-light text-dark border">Category: {category}</span>}
+              {activeSearch && <span className="badge bg-light text-dark border">Search: "{activeSearch}"</span>}
+              {minPrice && <span className="badge bg-light text-dark border">Min: ₹{minPrice}</span>}
+              {maxPrice && <span className="badge bg-light text-dark border">Max: ₹{maxPrice}</span>}
+              {sort !== 'newest' && <span className="badge bg-light text-dark border">Sort: {sort}</span>}
+            </div>
+
+            <button
+              onClick={handleResetFilters}
+              className="btn btn-link btn-sm text-decoration-none p-0 text-primary small"
+            >
+              Clear all filters
+            </button>
+          </div>
+        )}
+
+        {/* Section Heading with Results Count */}
+        <div className="d-flex align-items-center justify-content-between mb-3 px-1">
+          <h2 className="section-title mb-0">Explore Available Listings</h2>
           {!isLoading && !errorMessage && (
             <span className="text-muted small">
-              {totalProducts === 1 ? '1 listing found' : `${totalProducts} listings found`}
+              {totalProducts} {totalProducts === 1 ? 'device' : 'devices'} found
             </span>
           )}
         </div>
 
-        {/* Loading State */}
+        {/* Loading Spinner */}
         {isLoading && (
-          <div className="py-5 text-center my-4">
-            <div className="spinner-border text-primary" role="status">
-              <span className="visually-hidden">Loading products...</span>
+          <div className="d-flex flex-column align-items-center justify-content-center py-5 my-5">
+            <div className="spinner-border text-primary mb-3" role="status" style={{ width: '3rem', height: '3rem' }}>
+              <span className="visually-hidden">Loading marketplace products...</span>
             </div>
-            <p className="text-muted mt-3 small">Loading marketplace listings...</p>
+            <p className="text-muted small">Fetching pre-owned tech deals...</p>
           </div>
         )}
 
-        {/* Error State */}
+        {/* Error Alert */}
         {!isLoading && errorMessage && (
-          <div className="card border-0 shadow-sm p-4 text-center my-4">
-            <div className="text-danger mb-2" style={{ fontSize: '2rem' }}>⚠️</div>
-            <h6 className="fw-bold text-danger mb-2">Failed to Load Products</h6>
-            <p className="text-muted small mb-3">{errorMessage}</p>
-            <div>
-              <button
-                onClick={() => fetchProducts(currentPage)}
-                className="btn btn-outline-primary btn-sm px-4"
-              >
-                Retry
-              </button>
-            </div>
+          <div className="alert alert-danger py-3 px-4 rounded-3 text-center my-4" role="alert">
+            <p className="mb-2 fw-semibold">{errorMessage}</p>
+            <button
+              className="btn btn-outline-danger btn-sm"
+              onClick={() => loadProducts(currentPage)}
+            >
+              Try Again
+            </button>
           </div>
         )}
 
         {/* Empty State */}
         {!isLoading && !errorMessage && products.length === 0 && (
-          <div className="card border-0 shadow-sm p-5 text-center my-4">
-            <div className="mb-2" style={{ fontSize: '2.5rem' }}>📦</div>
-            <h5 className="fw-bold text-slate-800 mb-1">No Products Found</h5>
-            <p className="text-muted small mb-3">
-              {activeSearch || category || minPrice || maxPrice
-                ? 'No listings matched your active filters or search keyword.'
-                : 'There are currently no listings available in the marketplace.'}
+          <div className="empty-state-box text-center py-5 my-4 bg-white rounded-4 border p-4 shadow-sm">
+            <div className="empty-state-icon mb-3" style={{ fontSize: '3rem' }}>🔍</div>
+            <h4 className="fw-bold text-slate-700 mb-2">No Devices Match Your Search</h4>
+            <p className="text-muted small mb-3 mx-auto" style={{ maxWidth: '420px' }}>
+              We couldn't find any second-hand products matching your current filters. Try searching for broader terms or resetting your filters.
             </p>
-            {(activeSearch || category || minPrice || maxPrice) && (
-              <div>
-                <button
-                  onClick={handleResetFilters}
-                  className="btn btn-outline-secondary btn-sm px-3"
-                >
-                  Clear All Filters
-                </button>
-              </div>
-            )}
+            <button
+              className="btn btn-primary btn-sm px-4 fw-semibold"
+              onClick={handleResetFilters}
+            >
+              Reset All Filters
+            </button>
           </div>
         )}
 
         {/* Product Grid */}
         {!isLoading && !errorMessage && products.length > 0 && (
-          <>
-            <div className="row g-3 g-md-4 mb-4">
-              {products.map((product) => {
-                const sellerId =
-                  typeof product.seller === 'object' && product.seller !== null
-                    ? product.seller._id
-                    : typeof product.seller === 'string'
-                    ? product.seller
-                    : '';
-                const isOwner = Boolean(user?.id && sellerId && user.id === sellerId);
+          <div className="row g-3 g-md-4 mb-4">
+            {products.map((product) => {
+              const sellerId =
+                product.seller && typeof product.seller === 'object' && '_id' in product.seller
+                  ? product.seller._id
+                  : typeof product.seller === 'string'
+                  ? product.seller
+                  : '';
+              const isOwner = Boolean(user?.id && sellerId && user.id === sellerId);
 
-                return (
-                  <div key={product._id} className="col-12 col-sm-6 col-lg-3">
-                    <ProductCard product={product} isOwner={isOwner} />
-                  </div>
-                );
-              })}
-            </div>
+              return (
+                <div key={product._id} className="col-6 col-md-4 col-lg-3">
+                  <ProductCard product={product} isOwner={isOwner} />
+                </div>
+              );
+            })}
+          </div>
+        )}
 
-            {/* Pagination Controls */}
-            {totalPages > 1 && (
-              <nav className="d-flex justify-content-center align-items-center gap-2 my-4">
+        {/* Pagination Controls */}
+        {!isLoading && !errorMessage && totalPages > 1 && (
+          <nav aria-label="Product pagination" className="d-flex justify-content-center my-4">
+            <ul className="pagination pagination-custom gap-1">
+              {/* Previous Button */}
+              <li className={`page-item ${currentPage === 1 ? 'disabled' : ''}`}>
                 <button
-                  className="btn btn-outline-secondary btn-sm px-3"
-                  disabled={currentPage <= 1}
+                  className="page-link rounded-2"
                   onClick={() => handlePageChange(currentPage - 1)}
+                  disabled={currentPage === 1}
+                  aria-label="Previous"
                 >
-                  Previous
+                  ‹ Prev
                 </button>
-                <span className="small text-muted px-2">
-                  Page <strong>{currentPage}</strong> of <strong>{totalPages}</strong>
-                </span>
+              </li>
+
+              {/* Numbered Page Buttons */}
+              {Array.from({ length: totalPages }, (_, idx) => idx + 1).map((pageNum) => (
+                <li
+                  key={pageNum}
+                  className={`page-item ${currentPage === pageNum ? 'active' : ''}`}
+                >
+                  <button
+                    className="page-link rounded-2"
+                    onClick={() => handlePageChange(pageNum)}
+                  >
+                    {pageNum}
+                  </button>
+                </li>
+              ))}
+
+              {/* Next Button */}
+              <li className={`page-item ${currentPage === totalPages ? 'disabled' : ''}`}>
                 <button
-                  className="btn btn-outline-secondary btn-sm px-3"
-                  disabled={currentPage >= totalPages}
+                  className="page-link rounded-2"
                   onClick={() => handlePageChange(currentPage + 1)}
+                  disabled={currentPage === totalPages}
+                  aria-label="Next"
                 >
-                  Next
+                  Next ›
                 </button>
-              </nav>
-            )}
-          </>
+              </li>
+            </ul>
+          </nav>
         )}
       </main>
-
-      {/* Footer */}
-      <footer className="footer-custom border-top py-4 bg-white mt-auto">
-        <div className="container text-center text-muted small">
-          <div className="fw-semibold text-slate-700 mb-1">
-            ⚡ QuickSell - India's Technology-Focused Second-Hand Marketplace
-          </div>
-          <div>© {new Date().getFullYear()} QuickSell Inc. All rights reserved.</div>
-        </div>
-      </footer>
     </div>
   );
 };

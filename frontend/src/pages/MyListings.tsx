@@ -1,38 +1,19 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 import ProductCard from '../components/ProductCard';
-import type { BackendProduct } from '../components/ProductCard';
-import api from '../api/axios';
-import axios from 'axios';
+import { useAppDispatch, useAppSelector } from '../store/hooks';
+import { fetchMyListings } from '../store/productSlice';
 
 const MyListings: React.FC = () => {
-  const [products, setProducts] = useState<BackendProduct[]>([]);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
-  // Fetch authenticated user's listings from GET /api/products/my-listings
-  const fetchMyListings = async () => {
-    setIsLoading(true);
-    setErrorMessage(null);
-
-    try {
-      const response = await api.get<{ products: BackendProduct[] }>('/api/products/my-listings');
-      setProducts(response.data.products || []);
-    } catch (err: unknown) {
-      if (axios.isAxiosError(err) && err.response?.data?.message) {
-        setErrorMessage(err.response.data.message);
-      } else {
-        setErrorMessage('Failed to load your listings. Please try again.');
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  const dispatch = useAppDispatch();
+  const { myListings: products, isLoading, error: errorMessage } = useAppSelector(
+    (state) => state.products
+  );
 
   useEffect(() => {
-    fetchMyListings();
-  }, []);
+    dispatch(fetchMyListings());
+  }, [dispatch]);
 
   const availableCount = products.filter((p) => p.status === 'available').length;
   const soldCount = products.filter((p) => p.status === 'sold').length;
@@ -69,96 +50,76 @@ const MyListings: React.FC = () => {
 
         {/* Stats summary banner */}
         {!isLoading && !errorMessage && products.length > 0 && (
-          <div className="card border-0 shadow-sm rounded-4 p-3 mb-4 bg-white">
-            <div className="row g-2 text-center text-sm-start">
-              <div className="col-4 col-sm-3 border-end">
-                <span className="text-muted small d-block">Total Listings</span>
-                <span className="fw-bold fs-5 text-slate-800">{products.length}</span>
+          <div className="row g-3 mb-4">
+            <div className="col-12 col-sm-4">
+              <div className="p-3 bg-white rounded-3 border shadow-sm text-center">
+                <span className="text-muted small d-block mb-1">Total Listed</span>
+                <span className="h4 fw-bold text-slate-800">{products.length}</span>
               </div>
-              <div className="col-4 col-sm-3 border-end">
-                <span className="text-muted small d-block">Active / Available</span>
-                <span className="fw-bold fs-5 text-success">{availableCount}</span>
+            </div>
+            <div className="col-6 col-sm-4">
+              <div className="p-3 bg-white rounded-3 border shadow-sm text-center">
+                <span className="text-success small d-block mb-1">Active / Available</span>
+                <span className="h4 fw-bold text-success">{availableCount}</span>
               </div>
-              <div className="col-4 col-sm-3">
-                <span className="text-muted small d-block">Sold</span>
-                <span className="fw-bold fs-5 text-secondary">{soldCount}</span>
+            </div>
+            <div className="col-6 col-sm-4">
+              <div className="p-3 bg-white rounded-3 border shadow-sm text-center">
+                <span className="text-secondary small d-block mb-1">Sold Devices</span>
+                <span className="h4 fw-bold text-secondary">{soldCount}</span>
               </div>
             </div>
           </div>
         )}
 
-        {/* Loading State */}
+        {/* Loading Spinner */}
         {isLoading && (
-          <div className="py-5 text-center my-4">
-            <div className="spinner-border text-primary" role="status">
-              <span className="visually-hidden">Loading your listings...</span>
+          <div className="d-flex flex-column align-items-center justify-content-center py-5 my-5">
+            <div className="spinner-border text-primary mb-3" role="status" style={{ width: '3rem', height: '3rem' }}>
+              <span className="visually-hidden">Loading listings...</span>
             </div>
-            <p className="text-muted mt-3 small">Loading your listings...</p>
+            <p className="text-muted small">Loading your listings...</p>
           </div>
         )}
 
-        {/* Error State with Retry */}
+        {/* Error Alert */}
         {!isLoading && errorMessage && (
-          <div className="card border-0 shadow-sm p-4 text-center my-4 mx-auto" style={{ maxWidth: '600px' }}>
-            <div className="text-danger mb-2" style={{ fontSize: '2rem' }}>⚠️</div>
-            <h5 className="fw-bold text-slate-800 mb-2">Failed to Load Listings</h5>
-            <p className="text-muted small mb-3">{errorMessage}</p>
-            <div>
-              <button
-                onClick={fetchMyListings}
-                className="btn btn-outline-primary btn-sm px-4"
-              >
-                Retry
-              </button>
-            </div>
+          <div className="alert alert-danger py-3 px-4 rounded-3 text-center my-4" role="alert">
+            <p className="mb-2 fw-semibold">{errorMessage}</p>
+            <button
+              className="btn btn-outline-danger btn-sm"
+              onClick={() => dispatch(fetchMyListings())}
+            >
+              Try Again
+            </button>
           </div>
         )}
 
         {/* Empty State */}
         {!isLoading && !errorMessage && products.length === 0 && (
-          <div className="card border-0 shadow-sm p-5 text-center my-4 mx-auto rounded-4" style={{ maxWidth: '600px' }}>
-            <div className="mb-3" style={{ fontSize: '3rem' }}>📦</div>
-            <h4 className="fw-bold text-slate-800 mb-2">No Listings Yet</h4>
-            <p className="text-muted small mb-4">
-              You haven't posted any gadgets or tech products for sale yet. Start selling today!
+          <div className="empty-state-box text-center py-5 my-4 bg-white rounded-4 border p-4 shadow-sm">
+            <div className="empty-state-icon mb-3" style={{ fontSize: '3rem' }}>📦</div>
+            <h4 className="fw-bold text-slate-700 mb-2">No Products Listed Yet</h4>
+            <p className="text-muted small mb-3 mx-auto" style={{ maxWidth: '420px' }}>
+              You haven't posted any tech devices for sale yet. Turn your unused electronics into cash today!
             </p>
-            <div>
-              <Link to="/add-product" className="btn btn-primary px-4 py-2 fw-semibold">
-                Post Your First Listing
-              </Link>
-            </div>
+            <Link
+              to="/add-product"
+              className="btn btn-primary btn-sm px-4 fw-semibold"
+            >
+              Post Your First Product
+            </Link>
           </div>
         )}
 
-        {/* Product Grid */}
+        {/* Listings Grid */}
         {!isLoading && !errorMessage && products.length > 0 && (
           <div className="row g-3 g-md-4 mb-4">
-            {products.map((product) => {
-              const isSold = product.status === 'sold';
-
-              return (
-                <div key={product._id} className="col-12 col-sm-6 col-lg-3 position-relative">
-                  {/* Status Indicator Badge Overlay */}
-                  <div
-                    className="position-absolute end-0 top-0 m-3 z-3"
-                    style={{ pointerEvents: 'none' }}
-                  >
-                    {isSold ? (
-                      <span className="badge bg-danger shadow-sm px-2 py-1 small fw-bold">
-                        Sold
-                      </span>
-                    ) : (
-                      <span className="badge bg-success shadow-sm px-2 py-1 small fw-semibold">
-                        Available
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Existing ProductCard (isOwner=true applies subtle yellow card styling) */}
-                  <ProductCard product={product} isOwner={true} />
-                </div>
-              );
-            })}
+            {products.map((product) => (
+              <div key={product._id} className="col-6 col-md-4 col-lg-3">
+                <ProductCard product={product} isOwner={true} />
+              </div>
+            ))}
           </div>
         )}
       </main>

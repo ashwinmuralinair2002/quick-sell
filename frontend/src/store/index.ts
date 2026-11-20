@@ -1,10 +1,12 @@
 import { configureStore } from '@reduxjs/toolkit';
 import authReducer, { setTokenFromRefresh, clearAuth } from './authSlice';
+import productReducer from './productSlice';
 import { setTokenSyncHandler } from '../api/axios';
 
 export const store = configureStore({
   reducer: {
-    auth: authReducer
+    auth: authReducer,
+    products: productReducer
   }
 });
 

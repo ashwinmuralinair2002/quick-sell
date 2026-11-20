@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Navbar from '../components/Navbar';
-import api from '../api/axios';
-import axios from 'axios';
+import { useAppDispatch } from '../store/hooks';
+import { createProduct } from '../store/productSlice';
 
 // Exact categories and subcategories aligned with backend Product model
 const PRODUCT_CATEGORIES = {
@@ -32,6 +32,7 @@ interface ImagePreview {
 
 const AddProduct: React.FC = () => {
   const navigate = useNavigate();
+  const dispatch = useAppDispatch();
 
   // Form Fields State
   const [title, setTitle] = useState('');
@@ -158,11 +159,10 @@ const AddProduct: React.FC = () => {
         formData.append('images', img.file);
       });
 
-      // Submit to backend POST /api/products
-      // Browser automatically sets Content-Type with multipart boundary
-      const response = await api.post('/api/products', formData);
+      // Submit to backend via Redux action createProduct
+      const resultAction = await dispatch(createProduct(formData)).unwrap();
 
-      setSuccessMessage(response.data.message || 'Product created successfully!');
+      setSuccessMessage(resultAction.message || 'Product created successfully!');
 
       // Navigate to homepage after brief delay so user sees success confirmation
       setTimeout(() => {
@@ -170,8 +170,10 @@ const AddProduct: React.FC = () => {
       }, 1200);
 
     } catch (err: unknown) {
-      if (axios.isAxiosError(err) && err.response?.data?.message) {
-        setServerError(err.response.data.message);
+      if (typeof err === 'string') {
+        setServerError(err);
+      } else if (err instanceof Error) {
+        setServerError(err.message);
       } else {
         setServerError('Failed to create product listing. Please check your connection and try again.');
       }

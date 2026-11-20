@@ -2,10 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 import api from '../api/axios';
-import { useAppSelector } from '../store/hooks';
-import { useCart } from '../context/CartContext';
-import type { BackendProduct } from '../components/ProductCard';
 import axios from 'axios';
+import { useAppDispatch, useAppSelector } from '../store/hooks';
+import { fetchProductById, updateProduct, deleteProduct, clearSelectedProduct } from '../store/productSlice';
+import { useCart } from '../context/CartContext';
 
 const PRODUCT_CATEGORIES = {
   Mobiles: ['Smartphones', 'Tablets', 'Feature Phones'],
@@ -43,14 +43,15 @@ interface CartApiResponse {
 const ProductDetails: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const dispatch = useAppDispatch();
   const user = useAppSelector((state) => state.auth.user);
+  const { selectedProduct: product, isLoading, error: errorMessage } = useAppSelector(
+    (state) => state.products
+  );
   const { refreshCartCount } = useCart();
 
-  // Product Data and UI States
-  const [product, setProduct] = useState<BackendProduct | null>(null);
+  // Selected image index
   const [selectedImageIndex, setSelectedImageIndex] = useState<number>(0);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Cart Membership & Action States
   const [isInCart, setIsInCart] = useState<boolean>(false);
@@ -77,54 +78,53 @@ const ProductDetails: React.FC = () => {
   const [isMarkingSold, setIsMarkingSold] = useState<boolean>(false);
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
 
-  // Fetch product from GET /api/products/:id and check cart status from GET /api/cart
-  const fetchProductAndCartStatus = async () => {
+  // Fetch product from Redux fetchProductById and check cart status from GET /api/cart
+  useEffect(() => {
     if (!id) return;
 
-    setIsLoading(true);
-    setErrorMessage(null);
+    // Reset selected product when navigating to avoid stale data
+    dispatch(clearSelectedProduct());
+    setSelectedImageIndex(0);
 
-    try {
-      // 1. Fetch Product
-      const productPromise = api.get<{ product: BackendProduct }>(`/api/products/${id}`);
-      // 2. Fetch Cart if user is logged in
-      const cartPromise = user ? api.get<CartApiResponse>('/api/cart') : Promise.resolve(null);
+    // Fetch product details into Redux
+    dispatch(fetchProductById(id));
 
-      const [productResponse, cartResponse] = await Promise.all([productPromise, cartPromise]);
-
-      const data = productResponse.data.product;
-      setProduct(data);
-      setSelectedImageIndex(0);
-
-      // Pre-fill edit fields
-      setEditTitle(data.title);
-      setEditDescription(data.description);
-      setEditPrice(String(data.price));
-      setEditCategory(data.category as CategoryName);
-      setEditSubcategory(data.subcategory);
-
-      // Verify cart membership against backend cart
-      if (cartResponse && cartResponse.data && Array.isArray(cartResponse.data.items)) {
-        const itemExists = cartResponse.data.items.some((item) => item._id === id);
-        setIsInCart(itemExists);
-      } else {
+    // Fetch cart membership if user is logged in
+    const checkCartStatus = async () => {
+      if (!user) {
+        setIsInCart(false);
+        return;
+      }
+      try {
+        const cartResponse = await api.get<CartApiResponse>('/api/cart');
+        if (cartResponse && cartResponse.data && Array.isArray(cartResponse.data.items)) {
+          const itemExists = cartResponse.data.items.some((item) => item._id === id);
+          setIsInCart(itemExists);
+        } else {
+          setIsInCart(false);
+        }
+      } catch {
         setIsInCart(false);
       }
-    } catch (err: unknown) {
-      if (axios.isAxiosError(err) && err.response?.data?.message) {
-        setErrorMessage(err.response.data.message);
-      } else {
-        setErrorMessage('Failed to load product details. Please check your connection.');
-      }
-      setProduct(null);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+    };
 
+    checkCartStatus();
+
+    return () => {
+      dispatch(clearSelectedProduct());
+    };
+  }, [id, user, dispatch]);
+
+  // Sync edit form fields when product is loaded / updated
   useEffect(() => {
-    fetchProductAndCartStatus();
-  }, [id, user]);
+    if (product) {
+      setEditTitle(product.title);
+      setEditDescription(product.description);
+      setEditPrice(String(product.price));
+      setEditCategory(product.category as CategoryName);
+      setEditSubcategory(product.subcategory);
+    }
+  }, [product]);
 
   // Compute seller ID and ownership
   const sellerId =
@@ -312,13 +312,11 @@ const ProductDetails: React.FC = () => {
         });
       }
 
-      const response = await api.put<{ message: string; product: BackendProduct }>(
-        `/api/products/${id}`,
-        formData
-      );
+      const resultAction = await dispatch(
+        updateProduct({ id, data: formData })
+      ).unwrap();
 
-      setUpdateSuccess(response.data.message || 'Product updated successfully!');
-      setProduct(response.data.product);
+      setUpdateSuccess(resultAction.message || 'Product updated successfully!');
       setNewImages([]);
 
       setTimeout(() => {
@@ -326,8 +324,10 @@ const ProductDetails: React.FC = () => {
         setUpdateSuccess(null);
       }, 1000);
     } catch (err: unknown) {
-      if (axios.isAxiosError(err) && err.response?.data?.message) {
-        setUpdateError(err.response.data.message);
+      if (typeof err === 'string') {
+        setUpdateError(err);
+      } else if (err instanceof Error) {
+        setUpdateError(err.message);
       } else {
         setUpdateError('Failed to update product. Please check your connection.');
       }
@@ -344,12 +344,10 @@ const ProductDetails: React.FC = () => {
     setCartActionError(null);
 
     try {
-      const response = await api.put<{ message: string; product: BackendProduct }>(
-        `/api/products/${id}`,
-        { status: 'sold' }
-      );
+      await dispatch(
+        updateProduct({ id, data: { status: 'sold' } })
+      ).unwrap();
 
-      setProduct(response.data.product);
       setShowMarkSoldModal(false);
       setCartActionSuccess('Product marked as SOLD successfully!');
 
@@ -357,8 +355,10 @@ const ProductDetails: React.FC = () => {
         setCartActionSuccess(null);
       }, 3500);
     } catch (err: unknown) {
-      if (axios.isAxiosError(err) && err.response?.data?.message) {
-        setCartActionError(err.response.data.message);
+      if (typeof err === 'string') {
+        setCartActionError(err);
+      } else if (err instanceof Error) {
+        setCartActionError(err.message);
       } else {
         setCartActionError('Failed to mark product as sold.');
       }
@@ -376,12 +376,14 @@ const ProductDetails: React.FC = () => {
     setCartActionError(null);
 
     try {
-      await api.delete(`/api/products/${id}`);
+      await dispatch(deleteProduct(id)).unwrap();
       setShowDeleteModal(false);
       navigate('/', { replace: true });
     } catch (err: unknown) {
-      if (axios.isAxiosError(err) && err.response?.data?.message) {
-        setCartActionError(err.response.data.message);
+      if (typeof err === 'string') {
+        setCartActionError(err);
+      } else if (err instanceof Error) {
+        setCartActionError(err.message);
       } else {
         setCartActionError('Failed to delete product. Please try again.');
       }
