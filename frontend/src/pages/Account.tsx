@@ -4,6 +4,8 @@ import Navbar from '../components/Navbar';
 import api from '../api/axios';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { updateUser as updateAuthUser } from '../store/authSlice';
+import { fetchMyOrders } from '../store/checkoutSlice';
+import type { Order as UserOrder } from '../store/checkoutSlice';
 import axios from 'axios';
 
 interface AddressItem {
@@ -27,39 +29,6 @@ interface AddressFormData {
   state: string;
   pincode: string;
   isDefault: boolean;
-}
-
-interface OrderItemSnapshot {
-  product: string;
-  title: string;
-  price: number;
-  image: string;
-  seller: string;
-}
-
-interface OrderShippingSnapshot {
-  fullName: string;
-  phone: string;
-  addressLine: string;
-  landmark?: string;
-  city: string;
-  state: string;
-  pincode: string;
-}
-
-interface UserOrder {
-  _id: string;
-  buyer: string;
-  items: OrderItemSnapshot[];
-  shippingAddress: OrderShippingSnapshot;
-  itemCount: number;
-  subtotal: number;
-  gstRate: number;
-  gstAmount: number;
-  grandTotal: number;
-  status: string;
-  createdAt: string;
-  updatedAt: string;
 }
 
 const emptyAddressForm: AddressFormData = {
@@ -114,10 +83,10 @@ const Account: React.FC = () => {
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
   const [isDeletingAddress, setIsDeletingAddress] = useState<boolean>(false);
 
-  // 4. My Orders State
-  const [orders, setOrders] = useState<UserOrder[]>([]);
-  const [isLoadingOrders, setIsLoadingOrders] = useState<boolean>(true);
-  const [orderError, setOrderError] = useState<string | null>(null);
+  // 4. My Orders State from Redux
+  const { orders, loadingOrders: isLoadingOrders, ordersError: orderError } = useAppSelector(
+    (state) => state.checkout
+  );
   const [selectedOrder, setSelectedOrder] = useState<UserOrder | null>(null);
 
   // Load User Profile
@@ -153,29 +122,11 @@ const Account: React.FC = () => {
     }
   };
 
-  // Load My Orders
-  const loadOrders = async () => {
-    setIsLoadingOrders(true);
-    setOrderError(null);
-    try {
-      const response = await api.get<{ orders: UserOrder[] }>('/api/orders/my-orders');
-      setOrders(response.data.orders || []);
-    } catch (err: unknown) {
-      if (axios.isAxiosError(err) && err.response?.data?.message) {
-        setOrderError(err.response.data.message);
-      } else {
-        setOrderError('Failed to load your orders.');
-      }
-    } finally {
-      setIsLoadingOrders(false);
-    }
-  };
-
   useEffect(() => {
     loadProfile();
     loadAddresses();
-    loadOrders();
-  }, []);
+    dispatch(fetchMyOrders());
+  }, [dispatch]);
 
   // 1. Submit Personal Information (PUT /api/users/profile)
   const handleStartEditName = () => {

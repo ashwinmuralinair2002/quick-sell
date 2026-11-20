@@ -2,13 +2,15 @@ import { configureStore } from '@reduxjs/toolkit';
 import authReducer, { setTokenFromRefresh, clearAuth } from './authSlice';
 import productReducer from './productSlice';
 import cartReducer from './cartSlice';
+import checkoutReducer from './checkoutSlice';
 import { setTokenSyncHandler } from '../api/axios';
 
 export const store = configureStore({
   reducer: {
     auth: authReducer,
     products: productReducer,
-    cart: cartReducer
+    cart: cartReducer,
+    checkout: checkoutReducer
   }
 });
 
