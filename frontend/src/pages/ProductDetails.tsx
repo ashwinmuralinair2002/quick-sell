@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useForm } from 'react-hook-form';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
@@ -16,13 +17,12 @@ const PRODUCT_CATEGORIES = {
 
 type CategoryName = keyof typeof PRODUCT_CATEGORIES;
 
-interface EditFormErrors {
-  title?: string;
-  description?: string;
-  price?: string;
-  category?: string;
-  subcategory?: string;
-  images?: string;
+interface EditProductFormValues {
+  title: string;
+  category: CategoryName | '';
+  subcategory: string;
+  price: string;
+  description: string;
 }
 
 interface ImagePreview {
@@ -51,16 +51,34 @@ const ProductDetails: React.FC = () => {
 
   // Edit Mode States
   const [isEditing, setIsEditing] = useState<boolean>(false);
-  const [editTitle, setEditTitle] = useState<string>('');
-  const [editDescription, setEditDescription] = useState<string>('');
-  const [editPrice, setEditPrice] = useState<string>('');
-  const [editCategory, setEditCategory] = useState<CategoryName | ''>('');
-  const [editSubcategory, setEditSubcategory] = useState<string>('');
+  const [existingImages, setExistingImages] = useState<string[]>([]);
   const [newImages, setNewImages] = useState<ImagePreview[]>([]);
-  const [editErrors, setEditErrors] = useState<EditFormErrors>({});
+  const [imageError, setImageError] = useState<string | null>(null);
   const [isUpdating, setIsUpdating] = useState<boolean>(false);
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [updateSuccess, setUpdateSuccess] = useState<string | null>(null);
+
+  // React Hook Form for Edit Product
+  const {
+    register: registerEdit,
+    handleSubmit: handleEditSubmitRHF,
+    watch: watchEdit,
+    setValue: setEditValue,
+    reset: resetEditForm,
+    clearErrors: clearEditErrors,
+    formState: { errors: editErrors }
+  } = useForm<EditProductFormValues>({
+    defaultValues: {
+      title: '',
+      category: '',
+      subcategory: '',
+      price: '',
+      description: ''
+    },
+    mode: 'onSubmit'
+  });
+
+  const selectedEditCategory = watchEdit('category');
 
   // Confirmation Modal States (SweetAlert-style modal without external packages)
   const [showMarkSoldModal, setShowMarkSoldModal] = useState<boolean>(false);
@@ -84,16 +102,25 @@ const ProductDetails: React.FC = () => {
     };
   }, [id, dispatch]);
 
-  // Sync edit form fields when product is loaded / updated
+  // Sync edit form fields and images when product is loaded / updated
   useEffect(() => {
     if (product) {
-      setEditTitle(product.title);
-      setEditDescription(product.description);
-      setEditPrice(String(product.price));
-      setEditCategory(product.category as CategoryName);
-      setEditSubcategory(product.subcategory);
+      resetEditForm({
+        title: product.title,
+        description: product.description,
+        price: String(product.price),
+        category: (product.category as CategoryName) || '',
+        subcategory: product.subcategory || ''
+      });
+      // Extract existing image URLs
+      const urls: string[] = Array.isArray(product.images)
+        ? product.images
+            .map((img) => (typeof img === 'string' ? img : img && typeof img.url === 'string' ? img.url : ''))
+            .filter(Boolean)
+        : [];
+      setExistingImages(urls);
     }
-  }, [product]);
+  }, [product, resetEditForm]);
 
   // Compute seller ID and ownership
   const sellerId =
@@ -173,13 +200,38 @@ const ProductDetails: React.FC = () => {
     }
   };
 
+  // Reset edit form helper
+  const handleCancelEdit = () => {
+    setIsEditing(false);
+    newImages.forEach((img) => URL.revokeObjectURL(img.previewUrl));
+    setNewImages([]);
+    setImageError(null);
+    setUpdateError(null);
+    setUpdateSuccess(null);
+    if (product) {
+      resetEditForm({
+        title: product.title,
+        description: product.description,
+        price: String(product.price),
+        category: (product.category as CategoryName) || '',
+        subcategory: product.subcategory || ''
+      });
+      const urls: string[] = Array.isArray(product.images)
+        ? product.images
+            .map((img) => (typeof img === 'string' ? img : img && typeof img.url === 'string' ? img.url : ''))
+            .filter(Boolean)
+        : [];
+      setExistingImages(urls);
+    }
+  };
+
   // Handle Edit Category Change
   const handleEditCategoryChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const selected = e.target.value as CategoryName | '';
-    setEditCategory(selected);
-    setEditSubcategory('');
-    if (editErrors.category) setEditErrors((prev) => ({ ...prev, category: undefined }));
-    if (editErrors.subcategory) setEditErrors((prev) => ({ ...prev, subcategory: undefined }));
+    setEditValue('category', selected, { shouldValidate: true });
+    setEditValue('subcategory', '', { shouldValidate: false });
+    clearEditErrors('subcategory');
+    if (updateError) setUpdateError(null);
   };
 
   // Handle New Image Selection for Edit
@@ -187,12 +239,10 @@ const ProductDetails: React.FC = () => {
     if (!e.target.files) return;
     const selectedFiles = Array.from(e.target.files);
     const maxAllowed = 5;
+    const totalCount = existingImages.length + newImages.length + selectedFiles.length;
 
-    if (newImages.length + selectedFiles.length > maxAllowed) {
-      setEditErrors((prev) => ({
-        ...prev,
-        images: `You can upload a maximum of ${maxAllowed} images`
-      }));
+    if (totalCount > maxAllowed) {
+      setImageError(`You can upload a maximum of ${maxAllowed} images`);
       return;
     }
 
@@ -202,78 +252,63 @@ const ProductDetails: React.FC = () => {
     }));
 
     setNewImages((prev) => [...prev, ...previews]);
-    if (editErrors.images) setEditErrors((prev) => ({ ...prev, images: undefined }));
+    if (imageError) setImageError(null);
+    if (updateError) setUpdateError(null);
     e.target.value = '';
   };
 
+  // Handle Remove Existing Image (pending removal)
+  const handleRemoveExistingImage = (idxToRemove: number) => {
+    setExistingImages((prev) => prev.filter((_, idx) => idx !== idxToRemove));
+    if (imageError) setImageError(null);
+    if (updateError) setUpdateError(null);
+  };
+
+  // Handle Remove Newly Selected Image
   const handleRemoveNewImage = (idxToRemove: number) => {
     setNewImages((prev) => {
       const updated = prev.filter((_, idx) => idx !== idxToRemove);
       URL.revokeObjectURL(prev[idxToRemove].previewUrl);
       return updated;
     });
+    if (imageError) setImageError(null);
+    if (updateError) setUpdateError(null);
   };
 
-  // Validate Edit Form
-  const validateEditForm = (): boolean => {
-    const newErrors: EditFormErrors = {};
-
-    if (!editTitle.trim()) {
-      newErrors.title = 'Product title is required';
-    } else if (editTitle.trim().length < 5) {
-      newErrors.title = 'Title must be at least 5 characters long';
-    }
-
-    if (!editDescription.trim()) {
-      newErrors.description = 'Product description is required';
-    } else if (editDescription.trim().length < 15) {
-      newErrors.description = 'Description must be at least 15 characters long';
-    }
-
-    if (!editPrice.trim()) {
-      newErrors.price = 'Selling price is required';
-    } else {
-      const parsedPrice = Number(editPrice);
-      if (Number.isNaN(parsedPrice) || parsedPrice <= 0) {
-        newErrors.price = 'Please enter a valid positive selling price';
-      }
-    }
-
-    if (!editCategory) {
-      newErrors.category = 'Please select a main category';
-    }
-
-    if (!editSubcategory) {
-      newErrors.subcategory = 'Please select a subcategory';
-    }
-
-    if (newImages.length > 0 && newImages.length < 2) {
-      newErrors.images = 'If replacing photos, at least 2 images are required (maximum 5)';
-    }
-
-    setEditErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  };
-
-  // Handle Edit Submit (PUT /api/products/:id)
-  const handleEditSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // Handle Edit Form Submission via React Hook Form
+  const onEditSubmit = async (data: EditProductFormValues) => {
     setUpdateError(null);
     setUpdateSuccess(null);
 
-    if (!validateEditForm() || !id) return;
+    const totalImages = existingImages.length + newImages.length;
+    if (totalImages < 2) {
+      setImageError('At least two product images are required (maximum 5)');
+      return;
+    }
+    if (totalImages > 5) {
+      setImageError('You can upload a maximum of 5 images');
+      return;
+    }
 
+    if (!id) return;
+    setImageError(null);
     setIsUpdating(true);
 
     try {
       const formData = new FormData();
-      formData.append('title', editTitle.trim());
-      formData.append('description', editDescription.trim());
-      formData.append('price', editPrice.trim());
-      formData.append('category', editCategory);
-      formData.append('subcategory', editSubcategory);
+      formData.append('title', data.title.trim());
+      formData.append('description', data.description.trim());
+      formData.append('price', data.price.trim());
+      formData.append('category', data.category);
+      formData.append('subcategory', data.subcategory);
 
-      // Only append images if replacing existing images
+      // Append retained existing image URLs (both JSON string & repeated field for max compatibility)
+      formData.append('existingImages', JSON.stringify(existingImages));
+      existingImages.forEach((url) => {
+        formData.append('existingImages', url);
+      });
+
+      // Append newly selected images if any
       if (newImages.length > 0) {
         newImages.forEach((img) => {
           formData.append('images', img.file);
@@ -285,6 +320,7 @@ const ProductDetails: React.FC = () => {
       ).unwrap();
 
       setUpdateSuccess(resultAction.message || 'Product updated successfully!');
+      newImages.forEach((img) => URL.revokeObjectURL(img.previewUrl));
       setNewImages([]);
 
       setTimeout(() => {
@@ -535,6 +571,23 @@ const ProductDetails: React.FC = () => {
                             setIsEditing(true);
                             setUpdateError(null);
                             setUpdateSuccess(null);
+                            setImageError(null);
+                            if (product) {
+                              resetEditForm({
+                                title: product.title,
+                                description: product.description,
+                                price: String(product.price),
+                                category: (product.category as CategoryName) || '',
+                                subcategory: product.subcategory || ''
+                              });
+                              const urls: string[] = Array.isArray(product.images)
+                                ? product.images
+                                    .map((img) => (typeof img === 'string' ? img : img && typeof img.url === 'string' ? img.url : ''))
+                                    .filter(Boolean)
+                                : [];
+                              setExistingImages(urls);
+                              setNewImages([]);
+                            }
                           }}
                           className="btn btn-sm btn-outline-dark fw-semibold"
                         >
@@ -656,10 +709,7 @@ const ProductDetails: React.FC = () => {
               <button
                 type="button"
                 className="btn btn-outline-secondary btn-sm px-3"
-                onClick={() => {
-                  setIsEditing(false);
-                  setNewImages([]);
-                }}
+                onClick={handleCancelEdit}
                 disabled={isUpdating}
               >
                 Cancel
@@ -680,7 +730,7 @@ const ProductDetails: React.FC = () => {
               </div>
             )}
 
-            <form onSubmit={handleEditSubmit} noValidate>
+            <form onSubmit={handleEditSubmitRHF(onEditSubmit)} noValidate>
               {/* Product Title */}
               <div className="mb-3">
                 <label htmlFor="editTitle" className="form-label small fw-semibold">
@@ -691,13 +741,22 @@ const ProductDetails: React.FC = () => {
                   id="editTitle"
                   disabled={isUpdating}
                   className={`form-control ${editErrors.title ? 'is-invalid' : ''}`}
-                  value={editTitle}
-                  onChange={(e) => {
-                    setEditTitle(e.target.value);
-                    if (editErrors.title) setEditErrors((prev) => ({ ...prev, title: undefined }));
-                  }}
+                  placeholder="e.g. Apple iPhone 14 Pro 128GB Deep Purple (With Bill & Box)"
+                  {...registerEdit('title', {
+                    required: 'Product title is required',
+                    validate: (value) => {
+                      const trimmed = value.trim();
+                      if (!trimmed) return 'Product title is required';
+                      if (trimmed.length < 5) return 'Title must be at least 5 characters long';
+                      if (!/[a-zA-Z]/.test(trimmed)) return 'Title must contain at least one letter';
+                      return true;
+                    },
+                    onChange: () => {
+                      if (updateError) setUpdateError(null);
+                    }
+                  })}
                 />
-                {editErrors.title && <div className="field-error">{editErrors.title}</div>}
+                {editErrors.title && <div className="field-error">{editErrors.title.message}</div>}
               </div>
 
               {/* Category & Subcategory Row */}
@@ -706,21 +765,32 @@ const ProductDetails: React.FC = () => {
                   <label htmlFor="editCategory" className="form-label small fw-semibold">
                     Category <span className="text-danger">*</span>
                   </label>
-                  <select
-                    id="editCategory"
-                    disabled={isUpdating}
-                    className={`form-select ${editErrors.category ? 'is-invalid' : ''}`}
-                    value={editCategory}
-                    onChange={handleEditCategoryChange}
-                  >
-                    <option value="">Select Category</option>
-                    {Object.keys(PRODUCT_CATEGORIES).map((catKey) => (
-                      <option key={catKey} value={catKey}>
-                        {catKey}
-                      </option>
-                    ))}
-                  </select>
-                  {editErrors.category && <div className="field-error">{editErrors.category}</div>}
+                  {(() => {
+                    const { onChange, ...categoryRest } = registerEdit('category', {
+                      required: 'Please select a main category',
+                      validate: (value) => (value ? true : 'Please select a main category')
+                    });
+                    return (
+                      <select
+                        id="editCategory"
+                        disabled={isUpdating}
+                        className={`form-select ${editErrors.category ? 'is-invalid' : ''}`}
+                        {...categoryRest}
+                        onChange={(e) => {
+                          onChange(e);
+                          handleEditCategoryChange(e);
+                        }}
+                      >
+                        <option value="">Select Category</option>
+                        {Object.keys(PRODUCT_CATEGORIES).map((catKey) => (
+                          <option key={catKey} value={catKey}>
+                            {catKey}
+                          </option>
+                        ))}
+                      </select>
+                    );
+                  })()}
+                  {editErrors.category && <div className="field-error">{editErrors.category.message}</div>}
                 </div>
 
                 <div className="col-md-6">
@@ -729,25 +799,27 @@ const ProductDetails: React.FC = () => {
                   </label>
                   <select
                     id="editSubcategory"
-                    disabled={isUpdating || !editCategory}
+                    disabled={isUpdating || !selectedEditCategory}
                     className={`form-select ${editErrors.subcategory ? 'is-invalid' : ''}`}
-                    value={editSubcategory}
-                    onChange={(e) => {
-                      setEditSubcategory(e.target.value);
-                      if (editErrors.subcategory) setEditErrors((prev) => ({ ...prev, subcategory: undefined }));
-                    }}
+                    {...registerEdit('subcategory', {
+                      required: 'Please select a subcategory',
+                      validate: (value) => (value ? true : 'Please select a subcategory'),
+                      onChange: () => {
+                        if (updateError) setUpdateError(null);
+                      }
+                    })}
                   >
                     <option value="">
-                      {editCategory ? 'Select Subcategory' : 'Select Category first'}
+                      {selectedEditCategory ? 'Select Subcategory' : 'Select Category first'}
                     </option>
-                    {editCategory &&
-                      PRODUCT_CATEGORIES[editCategory]?.map((sub) => (
+                    {selectedEditCategory &&
+                      PRODUCT_CATEGORIES[selectedEditCategory as CategoryName]?.map((sub) => (
                         <option key={sub} value={sub}>
                           {sub}
                         </option>
                       ))}
                   </select>
-                  {editErrors.subcategory && <div className="field-error">{editErrors.subcategory}</div>}
+                  {editErrors.subcategory && <div className="field-error">{editErrors.subcategory.message}</div>}
                 </div>
               </div>
 
@@ -763,15 +835,25 @@ const ProductDetails: React.FC = () => {
                     id="editPrice"
                     disabled={isUpdating}
                     className={`form-control ${editErrors.price ? 'is-invalid' : ''}`}
+                    placeholder="Enter expected amount in INR"
                     min="1"
-                    value={editPrice}
-                    onChange={(e) => {
-                      setEditPrice(e.target.value);
-                      if (editErrors.price) setEditErrors((prev) => ({ ...prev, price: undefined }));
-                    }}
+                    {...registerEdit('price', {
+                      required: 'Selling price is required',
+                      validate: (value) => {
+                        if (!value || !value.toString().trim()) return 'Selling price is required';
+                        const numPrice = Number(value);
+                        if (Number.isNaN(numPrice) || numPrice <= 0) {
+                          return 'Please enter a valid positive selling price';
+                        }
+                        return true;
+                      },
+                      onChange: () => {
+                        if (updateError) setUpdateError(null);
+                      }
+                    })}
                   />
                 </div>
-                {editErrors.price && <div className="field-error">{editErrors.price}</div>}
+                {editErrors.price && <div className="field-error">{editErrors.price.message}</div>}
               </div>
 
               {/* Description */}
@@ -784,64 +866,138 @@ const ProductDetails: React.FC = () => {
                   rows={4}
                   disabled={isUpdating}
                   className={`form-control ${editErrors.description ? 'is-invalid' : ''}`}
-                  value={editDescription}
-                  onChange={(e) => {
-                    setEditDescription(e.target.value);
-                    if (editErrors.description) setEditErrors((prev) => ({ ...prev, description: undefined }));
-                  }}
+                  placeholder="Mention key details such as device condition, battery health, purchase date, included accessories, or warranty..."
+                  {...registerEdit('description', {
+                    required: 'Product description is required',
+                    validate: (value) => {
+                      const trimmed = value.trim();
+                      if (!trimmed) return 'Product description is required';
+                      if (trimmed.length < 15) return 'Description must be at least 15 characters long';
+                      return true;
+                    },
+                    onChange: () => {
+                      if (updateError) setUpdateError(null);
+                    }
+                  })}
                 />
-                {editErrors.description && <div className="field-error">{editErrors.description}</div>}
+                {editErrors.description && <div className="field-error">{editErrors.description.message}</div>}
               </div>
 
-              {/* Replace Images Section */}
+              {/* Product Images Management Section */}
               <div className="mb-4">
                 <label className="form-label small fw-semibold d-flex justify-content-between align-items-center">
-                  <span>Replace Images (Optional)</span>
-                  <span className="small text-muted">Leave empty to keep existing photos</span>
+                  <span>
+                    Product Images <span className="text-danger">*</span>
+                  </span>
+                  <span className="small text-muted">
+                    {`${existingImages.length + newImages.length}/5 selected (minimum 2 required)`}
+                  </span>
                 </label>
 
-                <div className="border border-2 border-dashed rounded-3 p-3 text-center bg-light mb-2">
+                {/* Upload Box */}
+                <div className="border border-2 border-dashed rounded-3 p-4 text-center bg-light mb-3">
+                  <div className="mb-2" style={{ fontSize: '2rem' }}>📷</div>
+                  <p className="small text-muted mb-2">
+                    Upload clear photos of your gadget from different angles.
+                  </p>
                   <label
-                    className={`btn btn-outline-primary btn-sm px-3 mb-0 ${isUpdating || newImages.length >= 5 ? 'disabled' : ''}`}
-                    style={{ cursor: isUpdating || newImages.length >= 5 ? 'not-allowed' : 'pointer' }}
+                    className={`btn btn-outline-primary btn-sm px-3 mb-0 ${isUpdating || existingImages.length + newImages.length >= 5 ? 'disabled' : ''}`}
+                    style={{ cursor: isUpdating || existingImages.length + newImages.length >= 5 ? 'not-allowed' : 'pointer' }}
                   >
-                    Select New Photos
+                    Choose Additional Photos
                     <input
                       type="file"
                       accept="image/*"
                       multiple
                       className="d-none"
                       onChange={handleNewImageChange}
-                      disabled={isUpdating || newImages.length >= 5}
+                      disabled={isUpdating || existingImages.length + newImages.length >= 5}
                     />
                   </label>
-                  <div className="small text-muted mt-1" style={{ fontSize: '0.75rem' }}>
-                    Selecting new photos will replace all existing photos on Cloudinary (min 2, max 5).
+                  <div className="small text-muted mt-2" style={{ fontSize: '0.75rem' }}>
+                    JPG, PNG, WebP up to 5MB each. Minimum 2, maximum 5 photos total.
                   </div>
                 </div>
 
-                {editErrors.images && <div className="field-error mb-2">{editErrors.images}</div>}
+                {imageError && <div className="field-error mb-2">{imageError}</div>}
 
-                {/* Previews of newly selected images */}
-                {newImages.length > 0 && (
-                  <div className="row g-2 mt-1">
-                    {newImages.map((img, index) => (
-                      <div key={index} className="col-4 col-sm-3 col-md-2 position-relative">
-                        <div className="border rounded-2 overflow-hidden position-relative bg-white" style={{ height: '70px' }}>
-                          <img src={img.previewUrl} alt={`New preview ${index + 1}`} className="w-100 h-100" style={{ objectFit: 'cover' }} />
-                          {!isUpdating && (
-                            <button
-                              type="button"
-                              onClick={() => handleRemoveNewImage(index)}
-                              className="btn btn-danger btn-sm p-0 position-absolute top-0 end-0 m-1 rounded-circle d-flex align-items-center justify-content-center"
-                              style={{ width: '20px', height: '20px', fontSize: '10px' }}
-                            >
-                              ✕
-                            </button>
-                          )}
+                {/* Existing Images Thumbnails */}
+                {existingImages.length > 0 && (
+                  <div className="mb-3">
+                    <span className="small fw-semibold text-muted d-block mb-1" style={{ fontSize: '0.75rem' }}>
+                      Current Images ({existingImages.length})
+                    </span>
+                    <div className="row g-2">
+                      {existingImages.map((url, index) => (
+                        <div key={index} className="col-4 col-sm-3 col-md-2 position-relative">
+                          <div
+                            className="border rounded-2 overflow-hidden position-relative bg-white"
+                            style={{ height: '90px' }}
+                          >
+                            <img
+                              src={url}
+                              alt={`Current product ${index + 1}`}
+                              className="w-100 h-100"
+                              style={{ objectFit: 'cover' }}
+                            />
+                            {!isUpdating && (
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveExistingImage(index)}
+                                className="btn btn-danger btn-sm p-0 position-absolute top-0 end-0 m-1 rounded-circle d-flex align-items-center justify-content-center"
+                                style={{ width: '22px', height: '22px', fontSize: '11px', lineHeight: 1 }}
+                                title="Remove existing image"
+                              >
+                                ✕
+                              </button>
+                            )}
+                          </div>
+                          <span className="small text-muted d-block text-center mt-1" style={{ fontSize: '0.7rem' }}>
+                            {index === 0 && newImages.length === 0 ? 'Cover Photo' : `Image ${index + 1}`}
+                          </span>
                         </div>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Newly Selected Images Previews */}
+                {newImages.length > 0 && (
+                  <div>
+                    <span className="small fw-semibold text-primary d-block mb-1" style={{ fontSize: '0.75rem' }}>
+                      Newly Added Photos ({newImages.length})
+                    </span>
+                    <div className="row g-2">
+                      {newImages.map((img, index) => (
+                        <div key={index} className="col-4 col-sm-3 col-md-2 position-relative">
+                          <div
+                            className="border rounded-2 overflow-hidden position-relative bg-white"
+                            style={{ height: '90px' }}
+                          >
+                            <img
+                              src={img.previewUrl}
+                              alt={`New Preview ${index + 1}`}
+                              className="w-100 h-100"
+                              style={{ objectFit: 'cover' }}
+                            />
+                            {!isUpdating && (
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveNewImage(index)}
+                                className="btn btn-danger btn-sm p-0 position-absolute top-0 end-0 m-1 rounded-circle d-flex align-items-center justify-content-center"
+                                style={{ width: '22px', height: '22px', fontSize: '11px', lineHeight: 1 }}
+                                title="Remove newly added image"
+                              >
+                                ✕
+                              </button>
+                            )}
+                          </div>
+                          <span className="small text-muted d-block text-center mt-1" style={{ fontSize: '0.7rem' }}>
+                            {`New ${index + 1}`}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
@@ -857,10 +1013,7 @@ const ProductDetails: React.FC = () => {
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    setIsEditing(false);
-                    setNewImages([]);
-                  }}
+                  onClick={handleCancelEdit}
                   className="btn btn-outline-secondary btn-sm px-3 fw-semibold"
                   disabled={isUpdating}
                 >

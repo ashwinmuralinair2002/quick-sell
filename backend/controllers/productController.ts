@@ -400,7 +400,8 @@ export const updateProduct = async (
             price,
             category,
             subcategory,
-            status
+            status,
+            existingImages: existingImagesRaw
         } = req.body;
 
         // Validate category and subcategory if provided
@@ -420,32 +421,84 @@ export const updateProduct = async (
             }
         }
 
-        // Handle new uploaded images if provided
+        // Handle existing images and new uploaded images
         const files = req.files as Express.Multer.File[] | undefined;
+        const hasNewFiles = Boolean(files && Array.isArray(files) && files.length > 0);
 
-        if (files && Array.isArray(files) && files.length > 0) {
-            if (files.length < 2) {
+        // Parse retained existing images if provided
+        let retainedExistingUrls: string[] | null = null;
+        if (existingImagesRaw !== undefined) {
+            if (Array.isArray(existingImagesRaw)) {
+                retainedExistingUrls = existingImagesRaw.filter((item): item is string => typeof item === 'string');
+            } else if (typeof existingImagesRaw === 'string') {
+                try {
+                    const parsed = JSON.parse(existingImagesRaw);
+                    if (Array.isArray(parsed)) {
+                        retainedExistingUrls = parsed.filter((item): item is string => typeof item === 'string');
+                    } else {
+                        retainedExistingUrls = [existingImagesRaw];
+                    }
+                } catch {
+                    retainedExistingUrls = [existingImagesRaw];
+                }
+            }
+        }
+
+        // Determine which existing images are retained vs removed
+        const currentProductImages = Array.isArray(product.images) ? product.images : [];
+        let retainedImages = currentProductImages;
+        let imagesToRemove: Array<{ url: string; public_id: string }> = [];
+
+        if (retainedExistingUrls !== null) {
+            retainedImages = currentProductImages.filter((img) => {
+                const url = typeof img === 'string' ? img : img?.url;
+                return Boolean(url && retainedExistingUrls!.includes(url));
+            });
+
+            imagesToRemove = currentProductImages.filter((img) => {
+                const url = typeof img === 'string' ? img : img?.url;
+                return Boolean(!url || !retainedExistingUrls!.includes(url));
+            }) as Array<{ url: string; public_id: string }>;
+        }
+
+        // Validate final total images count if an image update is being performed
+        if (hasNewFiles || retainedExistingUrls !== null) {
+            const finalImageCount = retainedImages.length + (files ? files.length : 0);
+            if (finalImageCount < 2 || finalImageCount > 5) {
                 res.status(400).json({
-                    message: 'At least two product images are required when updating images'
+                    message: 'Total product images must be between 2 and 5'
                 });
                 return;
             }
 
-            // Upload new images to Cloudinary
-            const newImages: { url: string; public_id: string }[] = [];
-            for (const file of files) {
-                const uploaded = await uploadToCloudinary(file.buffer);
-                newImages.push(uploaded);
-            }
-
-            // Remove old images from Cloudinary
-            for (const oldImage of product.images) {
-                if (oldImage && typeof oldImage === 'object' && 'public_id' in oldImage) {
-                    await deleteFromCloudinary((oldImage as { public_id: string }).public_id);
+            // Upload newly provided images to Cloudinary
+            const uploadedNewImages: { url: string; public_id: string }[] = [];
+            if (files && files.length > 0) {
+                try {
+                    for (const file of files) {
+                        const uploaded = await uploadToCloudinary(file.buffer);
+                        uploadedNewImages.push(uploaded);
+                    }
+                } catch (uploadError) {
+                    // Safe cleanup: avoid orphaned newly uploaded assets if batch upload fails
+                    for (const img of uploadedNewImages) {
+                        if (img.public_id) {
+                            await deleteFromCloudinary(img.public_id);
+                        }
+                    }
+                    throw uploadError;
                 }
             }
 
-            product.images = newImages as any;
+            // Update product images collection: retained existing images + newly uploaded images
+            product.images = [...retainedImages, ...uploadedNewImages] as any;
+
+            // Only delete removed assets from Cloudinary after successfully preparing update
+            for (const oldImage of imagesToRemove) {
+                if (oldImage && typeof oldImage === 'object' && 'public_id' in oldImage) {
+                    await deleteFromCloudinary(oldImage.public_id);
+                }
+            }
         }
 
         // Update other fields if provided
